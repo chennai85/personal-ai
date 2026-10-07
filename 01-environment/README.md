@@ -11,11 +11,13 @@ Setting up a Mac for AI work, from a clean machine to a verified environment.
 
 Three Macs, one standard, one model server.
 
-| Machine | Profile | Role | Local models |
-|---|---|---|---|
-| Mac Studio | `studio` | Runs the AI models for the whole house | Up to 400 GB |
-| iMac | `imac` | Desk work and learning | Up to 20 GB |
-| MacBook | `macbook` | Coding and travel | Up to 10 GB |
+| Machine | Profile | Memory / Disk | Role | Local models |
+|---|---|---|---|---|
+| Mac Studio | `studio` | 48 GB / 1 TB | Runs the AI models for the whole house | Up to 200 GB |
+| iMac | `imac` | 24 GB / 256 GB | Desk work and learning | Up to 20 GB |
+| MacBook | `macbook` | | Coding and travel | Up to 10 GB |
+
+For AI models, **memory matters more than disk**: a model must fit in memory to run. 24 GB handles small models (around 8B parameters); 48 GB handles mid-size ones (up to around 30B).
 
 The Mac Studio does the heavy thinking. The iMac and MacBook send their requests to it over **Tailscale**, a private network between your own devices. Each machine finds the server through one setting: `MODEL_BASE_URL`.
 
@@ -62,8 +64,8 @@ Type `dr` in any terminal to jump there.
 ```bash
 mkdir -p ~/driving-range/ai-experiments
 cd ~/driving-range/ai-experiments
-git clone https://github.com/<your-username>/personal-ai.git
-cd personal-ai/01-environment
+git clone https://github.com/<your-username>/<your-repo>.git
+cd <your-repo>/personal-ai/01-environment
 ```
 
 On a brand-new Mac, `git` may not exist yet. Running `git` once will prompt macOS to install the Command Line Tools. Accept, wait, then run the clone again.
@@ -81,7 +83,10 @@ Expect:
 - A few minutes while Python builds
 - A short "still to do by hand" list at the end (usually Tailscale)
 
-### 3. Install Tailscale (by hand)
+### 3. Install Tailscale (MacBook now; others later)
+
+Only the MacBook needs Tailscale today: it's how it reaches the Mac Studio when you're away from home. On the iMac and Studio it's optional and shows as a WARN until you install it.
+
 
 1. Download from [tailscale.com/download/mac](https://tailscale.com/download/mac) or the Mac App Store
 2. Sign in with the same account on every Mac
@@ -89,7 +94,7 @@ Expect:
 
 ### 4. Verify
 
-Open a **new** terminal window (so it picks up the new settings), then:
+Reload your shell so it picks up the new settings (`exec zsh`, or open a new terminal window), then:
 
 ```bash
 bash verify.sh
@@ -109,7 +114,7 @@ WARN|model server reachable|no answer from http://mac-studio:11434 (expected unt
 PASS|free disk|412 GB (min 50)
 ```
 
-**Done when:** `fail=0`. The one WARN is expected: the model server is set up in Step 2.
+**Done when:** `fail=0`. WARNs are fine: the model server isn't set up until Step 2, and Tailscale is optional except on the MacBook.
 
 ---
 
@@ -137,7 +142,7 @@ Change a value there, run `setup.sh` again, then `verify.sh`. Both scripts read 
 |---|---|
 | `python3` points to `/usr/bin/python3` | Open a new terminal. If it persists, check that `~/.zshrc` has the pyenv lines |
 | `pyenv install` fails with a build error | Run `xcode-select --install`, then try again |
-| `MODEL_BASE_URL` FAIL right after setup | You're in the old terminal. Open a new one |
+| `python3` → `/usr/bin/python3`, PATH missing shims, and `MODEL_BASE_URL` FAIL, all at once | The terminal started before setup. Run `exec zsh` and verify again |
 | `free disk` FAIL | Models are large. Clear space before Step 2 |
 
 ---

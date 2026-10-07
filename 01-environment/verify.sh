@@ -84,8 +84,12 @@ REPOS="$(find "$DR_ROOT" -maxdepth 3 -type d -name .git 2>/dev/null | wc -l | tr
 if [ "$REPOS" = "0" ]; then rec INFO "repos" "none found yet under $DR_ROOT"; else rec INFO "repos" "$REPOS git repos under $DR_ROOT"; fi
 
 # ---------- network + model server ----------
-if [ "$NEED_TAILSCALE" = "1" ]; then
-  if [ -d /Applications/Tailscale.app ]; then rec PASS "app" "/Applications/Tailscale.app"; else rec FAIL "app" "/Applications/Tailscale.app missing"; fi
+if [ -d /Applications/Tailscale.app ]; then
+  rec PASS "app" "/Applications/Tailscale.app"
+elif [ "$NEED_TAILSCALE" = "1" ]; then
+  rec FAIL "app" "/Applications/Tailscale.app missing"
+else
+  rec WARN "app" "Tailscale not installed (optional for $PROFILE)"
 fi
 if [ -n "${MODEL_BASE_URL:-}" ]; then
   rec PASS "MODEL_BASE_URL" "$MODEL_BASE_URL"
@@ -95,7 +99,7 @@ if [ -n "${MODEL_BASE_URL:-}" ]; then
     else rec WARN "model server reachable" "no answer from $MODEL_BASE_URL (expected until step 2)"; fi
   fi
 else
-  rec FAIL "MODEL_BASE_URL" "not set in this shell (open a new terminal after editing ~/.zshrc)"
+  rec FAIL "MODEL_BASE_URL" "not set in this shell (run: exec zsh, or open a new terminal)"
 fi
 
 # ---------- disk ----------

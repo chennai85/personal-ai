@@ -135,13 +135,13 @@ ok "check done"
 
 # ---------------------------------------------------------------------
 step "8. Tailscale (private network between your Macs)"
-if [ "$NEED_TAILSCALE" = "1" ]; then
-  if [ -d /Applications/Tailscale.app ]; then
-    ok "installed"
-  else
-    add_todo "Install Tailscale from https://tailscale.com/download/mac (or the Mac App Store), sign in, and name the Mac Studio 'mac-studio'."
-    echo "    not installed (see list at the end)"
-  fi
+if [ -d /Applications/Tailscale.app ]; then
+  ok "installed"
+elif [ "$NEED_TAILSCALE" != "1" ]; then
+  ok "optional for $PROFILE, skipping"
+else
+  add_todo "Install Tailscale from https://tailscale.com/download/mac (or the Mac App Store), sign in, and name the Mac Studio 'mac-studio'."
+  echo "    not installed (see list at the end)"
 fi
 
 # ---------------------------------------------------------------------
@@ -154,6 +154,6 @@ if [ -n "$TODO" ]; then
   printf "%s" "$TODO"
 fi
 echo
-echo "Next: open a NEW terminal window, then run:"
+echo "Next: reload your shell (exec zsh) or open a NEW terminal, then run:"
 echo "    bash $HERE/verify.sh"
 echo "================================================================"
