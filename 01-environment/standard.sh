@@ -41,7 +41,7 @@ load_profile() {
     macbook)
       ROLE="coding and travel"
       MAX_MODEL_GB=10
-      NEED_TAILSCALE=1
+      NEED_TAILSCALE=0
       MODEL_URL="http://mac-studio:11434"
       ;;
     imac)
