@@ -31,12 +31,11 @@ MODEL_DIRS="$HOME/.ollama/models $HOME/.cache/huggingface/hub"
 #   MAX_MODEL_GB    how much disk local models may use
 #   NEED_TAILSCALE  1 = required, 0 = optional (WARN if missing)
 #                   Tailscale = private network between your machines.
-#                   Only the MacBook needs it now: it reaches the Studio away from home.
 #   MODEL_URL       where this machine sends AI requests (MODEL_BASE_URL)
 #
 # The Mac Studio is the model server. The other Macs reach it over
-# Tailscale. "mac-studio" is the Studio's Tailscale machine name;
-# change it if yours is different.
+# Tailscale. "zenstudio" is the Studio's Tailscale machine name
+# (shown in the Tailscale app); change it if yours is different.
 # ---------------------------------------------------------------------
 load_profile() {
   case "$1" in
@@ -44,18 +43,18 @@ load_profile() {
       ROLE="coding and travel"
       MAX_MODEL_GB=10
       NEED_TAILSCALE=1
-      MODEL_URL="http://mac-studio:11434"
+      MODEL_URL="http://zenstudio:11434"
       ;;
     imac)
       ROLE="desk work and learning"
       MAX_MODEL_GB=20
-      NEED_TAILSCALE=0
-      MODEL_URL="http://mac-studio:11434"
+      NEED_TAILSCALE=1
+      MODEL_URL="http://zenstudio:11434"
       ;;
     studio)
       ROLE="model server"
       MAX_MODEL_GB=200
-      NEED_TAILSCALE=0
+      NEED_TAILSCALE=1
       MODEL_URL="http://localhost:11434"
       ;;
     *)

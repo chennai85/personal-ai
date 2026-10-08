@@ -13,7 +13,7 @@ Three Macs, one standard, one model server.
 
 | Machine | Profile | Memory / Disk | Role | Local models |
 |---|---|---|---|---|
-| Mac Studio | `studio` | 48 GB / 1 TB | Runs the AI models for the whole house | Up to 200 GB |
+| Mac Studio (`zenstudio`) | `studio` | 48 GB / 1 TB | Runs the AI models for the whole house | Up to 200 GB |
 | iMac | `imac` | 24 GB / 256 GB | Desk work and learning | Up to 20 GB |
 | MacBook | `macbook` | | Coding and travel | Up to 10 GB |
 
@@ -83,14 +83,15 @@ Expect:
 - A few minutes while Python builds
 - A short "still to do by hand" list at the end (usually Tailscale)
 
-### 3. Install Tailscale (MacBook now; others later)
+### 3. Install Tailscale
 
-Only the MacBook needs Tailscale today: it's how it reaches the Mac Studio when you're away from home. On the iMac and Studio it's optional and shows as a WARN until you install it.
-
+Tailscale puts your Macs on one private network, at home or away.
 
 1. Download from [tailscale.com/download/mac](https://tailscale.com/download/mac) or the Mac App Store
-2. Sign in with the same account on every Mac
-3. On the Mac Studio, set its machine name to `mac-studio` in the Tailscale admin console, and make sure **MagicDNS** is on (it's what lets the other Macs reach it by that name)
+2. Sign in with the **same account** on every Mac
+3. Note the Studio's name in the Tailscale app (mine is `zenstudio`). If yours differs, change `MODEL_URL` in `standard.sh` to match
+
+The free Personal plan covers this setup.
 
 ### 4. Verify
 
@@ -109,12 +110,12 @@ PASS|profile declared|imac
 INFO|role|desk work and learning
 PASS|root dir|/Users/you/driving-range
 ...
-PASS|MODEL_BASE_URL|http://mac-studio:11434
-WARN|model server reachable|no answer from http://mac-studio:11434 (expected until step 2)
+PASS|MODEL_BASE_URL|http://zenstudio:11434
+WARN|model server reachable|no answer from http://zenstudio:11434 (expected until step 2)
 PASS|free disk|412 GB (min 50)
 ```
 
-**Done when:** `fail=0`. WARNs are fine: the model server isn't set up until Step 2, and Tailscale is optional except on the MacBook.
+**Done when:** `fail=0`. The one WARN is expected: the model server isn't set up until Step 2.
 
 ---
 

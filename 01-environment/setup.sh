@@ -140,7 +140,7 @@ if [ -d /Applications/Tailscale.app ]; then
 elif [ "$NEED_TAILSCALE" != "1" ]; then
   ok "optional for $PROFILE, skipping"
 else
-  add_todo "Install Tailscale from https://tailscale.com/download/mac (or the Mac App Store), sign in, and name the Mac Studio 'mac-studio'."
+  add_todo "Install Tailscale from https://tailscale.com/download/mac (or the Mac App Store), and sign in with the same account on every Mac."
   echo "    not installed (see list at the end)"
 fi
 
