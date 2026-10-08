@@ -64,8 +64,8 @@ Type `dr` in any terminal to jump there.
 ```bash
 mkdir -p ~/driving-range/ai-experiments
 cd ~/driving-range/ai-experiments
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>/personal-ai/01-environment
+git clone https://github.com/chennai85/personal-ai.git
+cd personal-ai/01-environment
 ```
 
 On a brand-new Mac, `git` may not exist yet. Running `git` once will prompt macOS to install the Command Line Tools. Accept, wait, then run the clone again.
