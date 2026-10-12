@@ -2,7 +2,9 @@
 
 A private model running on the Mac Studio, shared with the iMac and MacBook over Tailscale.
 
+> **Status:** ✅ Done, October 12, 2026. All three Macs pass Standard v1.2.
 > **Why these models:** [WHY-THIS-MODEL.md](WHY-THIS-MODEL.md)
+> **Visual guide:** [learn.aishree.me/step2_local_model.html](https://learn.aishree.me/step2_local_model.html)
 > **The story** is on the blog: [aishree.me/personal-ai](https://www.aishree.me/personal-ai)
 
 ---
