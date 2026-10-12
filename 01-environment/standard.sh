@@ -1,12 +1,12 @@
 #!/bin/bash
 # shellcheck disable=SC2034  # variables are used by setup.sh and verify.sh
 # =====================================================================
-# Driving Range Standard v1.1
+# Driving Range Standard v1.2
 # The single source of truth for how every machine is set up.
 # setup.sh and verify.sh both read this file. Change values here only.
 # =====================================================================
 
-STANDARD_VERSION="1.1"
+STANDARD_VERSION="1.2"
 
 # Where all work lives
 DR_ROOT="$HOME/driving-range"
@@ -24,6 +24,20 @@ MIN_FREE_GB=50
 
 # Where downloaded models are counted (Ollama + Hugging Face caches)
 MODEL_DIRS="$HOME/.ollama/models $HOME/.cache/huggingface/hub"
+
+# ---------------------------------------------------------------------
+# Model server (Step 2). Runs on the Mac Studio only.
+# Why these models: personal-ai/02-local-model/WHY-THIS-MODEL.md
+# To switch models, change the tags here and re-run server_setup.sh.
+# ---------------------------------------------------------------------
+MODEL_MAIN="qwen3.6:35b-a3b"     # main model: depth
+MODEL_FAST="gemma4:e4b"          # fast model: quick tasks, fallback
+OLLAMA_PORT=11434
+OLLAMA_LISTEN="0.0.0.0"          # accept requests from other Macs (see README security note)
+OLLAMA_CONTEXT_LENGTH=32768      # how much text one conversation can hold
+OLLAMA_KEEP_ALIVE="30m"          # keep a model in memory 30 minutes after last use
+OLLAMA_NUM_PARALLEL=2            # answer two requests at once per model
+OLLAMA_MAX_LOADED_MODELS=2       # main + fast can both stay loaded
 
 # ---------------------------------------------------------------------
 # Profiles: one per machine.
