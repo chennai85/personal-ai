@@ -102,7 +102,8 @@ Results are saved to `~/driving-range/scripts/audits/speedtest_*.txt`.
 | Studio | gemma4:e4b | ~94 tokens/sec | 52 tokens | 0.6 s |
 | iMac (over Tailscale) | qwen3.6:35b-a3b | ~95–102 tokens/sec | 111 tokens | **1.1 s** |
 | iMac (over Tailscale) | gemma4:e4b | ~83–85 tokens/sec | 52 tokens | 0.6 s |
-| MacBook (over Tailscale) | qwen3.6:35b-a3b | *to measure* | | |
+| MacBook (over Tailscale) | qwen3.6:35b-a3b | ~104 tokens/sec (47 on its first run) | 111 tokens | **1.1 s** |
+| MacBook (over Tailscale) | gemma4:e4b | ~88 tokens/sec | 52 tokens | 0.6 s |
 
 First-run load times: Qwen 10.4 s, Gemma 5.5 s. After that, models stay in memory for 30 minutes.
 
@@ -110,6 +111,7 @@ First-run load times: Qwen 10.4 s, Gemma 5.5 s. After that, models stay in memor
 - Third-party guides estimated 40–70 tokens/sec for Qwen on this class of Mac. The Studio did ~130.
 - The *bigger* model writes *faster* than the small one. Qwen is a mixture-of-experts model: 35B parameters, but only ~3B work on each word.
 - On the Studio's first runs, Qwen spent about 2 of its 3.1 seconds on the prompt before writing. Later runs from the iMac waited 0.0 s: the server had already processed that prompt. New prompts pay that cost once.
+- The MacBook's first run wrote at only 47 tokens/sec, then 104 on the second. Write speed is measured on the Studio, so this was the Studio being briefly busy, not the network. Always run the test twice.
 - **The network costs almost nothing.** A full answer reached the iMac in about a second. Write speed is measured on the Studio, so the 95–130 range is normal run-to-run variation, not Tailscale.
 - For scale: people read about 4–5 words a second. ~130 tokens/sec is roughly 100 words a second.
 
