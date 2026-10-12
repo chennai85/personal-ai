@@ -7,7 +7,7 @@
 #
 # Sends the same short task to each model at $MODEL_BASE_URL and reports:
 #   load     seconds to load the model into memory (0 if already loaded)
-#   read     how fast it reads your prompt (tokens/sec)
+#   wait     seconds of thinking about the prompt before the answer starts
 #   write    how fast it writes the answer (tokens/sec)  <- the one you feel
 #   total    seconds from request to complete answer
 # Results are saved to ~/driving-range/scripts/audits/.
@@ -32,8 +32,8 @@ if ! curl -s -m 5 "$URL/api/version" >/dev/null; then
 fi
 
 NOW="$(date '+%Y-%m-%d %H:%M:%S')"
-REPORT="# speedtest host=$HOST profile=$PROFILE server=$URL time=$NOW standard=v$STANDARD_VERSION
-model|load_s|read_tok_s|write_tok_s|answer_tokens|total_s"
+HEADER="# speedtest host=$HOST profile=$PROFILE server=$URL time=$NOW standard=v$STANDARD_VERSION"
+REPORT="model|load_s|wait_s|write_tok_s|answer_tokens|total_s"
 
 for m in $MODELS; do
   echo "Testing $m ..." >&2
@@ -51,22 +51,22 @@ if "error" in r:
     print(f"{name}|error: {err}|||"); sys.exit()
 ns = 1e9
 load = r.get("load_duration", 0) / ns
-pe_n, pe_d = r.get("prompt_eval_count", 0), r.get("prompt_eval_duration", 0) / ns
+wait = r.get("prompt_eval_duration", 0) / ns
 ev_n, ev_d = r.get("eval_count", 0), r.get("eval_duration", 0) / ns
 total = r.get("total_duration", 0) / ns
-read = pe_n / pe_d if pe_d else 0
 write = ev_n / ev_d if ev_d else 0
-print(f"{name}|{load:.1f}|{read:.0f}|{write:.1f}|{ev_n}|{total:.1f}")
+print(f"{name}|{load:.1f}|{wait:.1f}|{write:.1f}|{ev_n}|{total:.1f}")
 ' "$m")
   REPORT="$REPORT
 $LINE"
 done
 
 echo
+echo "$HEADER"
 if command -v column >/dev/null; then printf "%s\n" "$REPORT" | column -t -s "|"; else printf "%s\n" "$REPORT"; fi
 mkdir -p "$DR_ROOT/scripts/audits"
 OUT="$DR_ROOT/scripts/audits/speedtest_${PROFILE}_${HOST}_$(date +%Y%m%d_%H%M%S).txt"
-printf "%s\n" "$REPORT" > "$OUT"
+printf "%s\n%s\n" "$HEADER" "$REPORT" > "$OUT"
 echo
 echo "Saved: $OUT"
 echo "Tip: run it twice. The first run includes loading the model; the second shows everyday speed."

@@ -86,7 +86,7 @@ Run it **twice**. The first run includes loading the model into memory; the seco
 | Column | Meaning |
 |---|---|
 | `load_s` | Seconds to load the model (0 when already loaded) |
-| `read_tok_s` | How fast it reads your prompt |
+| `wait_s` | Seconds spent on your prompt before the answer starts |
 | `write_tok_s` | **How fast it writes the answer. The number you feel.** |
 | `total_s` | Request to finished answer |
 
@@ -94,13 +94,23 @@ Run it on the Studio *and* the MacBook: the difference is the cost of the networ
 
 Results are saved to `~/driving-range/scripts/audits/speedtest_*.txt`.
 
-**Results:** *(to be filled in)*
+**Results (October 12, 2026, second run, models already loaded):**
 
-| From | Model | Write speed | Total |
-|---|---|---|---|
-| Studio | qwen3.6:35b-a3b | | |
-| Studio | gemma4:e4b | | |
-| MacBook | qwen3.6:35b-a3b | | |
+| From | Model | Write speed | Answer | Total |
+|---|---|---|---|---|
+| Studio | qwen3.6:35b-a3b | **~130 tokens/sec** | 111 tokens | 3.1 s |
+| Studio | gemma4:e4b | ~94 tokens/sec | 52 tokens | 0.6 s |
+| MacBook (over Tailscale) | qwen3.6:35b-a3b | *to measure* | | |
+
+First-run load times: Qwen 10.4 s, Gemma 5.5 s. After that, models stay in memory for 30 minutes.
+
+**What stood out:**
+- Third-party guides estimated 40–70 tokens/sec for Qwen on this class of Mac. The Studio did ~130.
+- The *bigger* model writes *faster* than the small one. Qwen is a mixture-of-experts model: 35B parameters, but only ~3B work on each word.
+- Qwen spends about 2 of its 3.1 seconds before it starts writing. Worth a closer look later.
+- For scale: people read about 4–5 words a second. ~130 tokens/sec is roughly 100 words a second.
+
+**Fixed along the way:** the first version of `speedtest.sh` had a "read speed" column. On the second run, Ollama reused the prompt it had already processed and reported 1,290,323 tokens/sec, which is meaningless. It was replaced with `wait_s`, the time you actually wait.
 
 ---
 
