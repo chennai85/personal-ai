@@ -93,13 +93,35 @@ else
 fi
 if [ -n "${MODEL_BASE_URL:-}" ]; then
   rec PASS "MODEL_BASE_URL" "$MODEL_BASE_URL"
-  # Reachability is a WARN only: the model server is set up in step 2
-  if command -v curl >/dev/null 2>&1; then
-    if curl -s -m 3 -o /dev/null "$MODEL_BASE_URL"; then rec PASS "model server reachable" "$MODEL_BASE_URL"
-    else rec WARN "model server reachable" "no answer from $MODEL_BASE_URL (expected until step 2)"; fi
+  # Step 2 checks are WARN, not FAIL: the Studio may be asleep, and
+  # a machine that has only done Step 1 should still pass.
+  if curl -s -m 3 "$MODEL_BASE_URL/api/version" >/dev/null 2>&1; then
+    rec PASS "model server reachable" "$MODEL_BASE_URL ($(curl -s -m 3 "$MODEL_BASE_URL/api/version" | sed 's/[{}"]//g'))"
+    TAGS="$(curl -s -m 5 "$MODEL_BASE_URL/api/tags" 2>/dev/null)"
+    for m in $MODEL_MAIN $MODEL_FAST; do
+      if printf '%s' "$TAGS" | grep -q "\"name\":\"$m\""; then rec PASS "model available" "$m"
+      else rec WARN "model available" "$m not on the server (run server_setup.sh on the Studio)"; fi
+    done
+  else
+    rec WARN "model server reachable" "no answer from $MODEL_BASE_URL (Studio asleep, or Step 2 not done)"
   fi
 else
   rec FAIL "MODEL_BASE_URL" "not set in this shell (run: exec zsh, or open a new terminal)"
+fi
+
+# ---------- model server host (Studio only) ----------
+if [ "$PROFILE" = "studio" ]; then
+  if command -v ollama >/dev/null 2>&1; then rec PASS "tool ollama" "$(command -v ollama)"
+  else rec WARN "tool ollama" "not installed (Step 2: server_setup.sh)"; fi
+  SVC="$HOME/Library/LaunchAgents/com.drivingrange.ollama.plist"
+  if [ -f "$SVC" ]; then
+    if launchctl print "gui/$(id -u)/com.drivingrange.ollama" >/dev/null 2>&1; then rec PASS "ollama service" "loaded, starts at login"
+    else rec WARN "ollama service" "file exists but not loaded (re-run server_setup.sh)"; fi
+    if grep -q "$OLLAMA_LISTEN:$OLLAMA_PORT" "$SVC"; then rec PASS "ollama listens" "$OLLAMA_LISTEN:$OLLAMA_PORT (other Macs can connect)"
+    else rec WARN "ollama listens" "not on $OLLAMA_LISTEN:$OLLAMA_PORT (re-run server_setup.sh)"; fi
+  else
+    rec WARN "ollama service" "not set up (Step 2: server_setup.sh)"
+  fi
 fi
 
 # ---------- disk ----------
