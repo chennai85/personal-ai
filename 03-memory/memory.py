@@ -296,8 +296,11 @@ def cmd_ingest(args):
                  f"{S['embed_model']}. Vectors from different models don't mix.\n"
                  f"Run: uv run memory.py rebuild")
     meta(con, "embed_model", S["embed_model"])
-    if meta(con, "chunker") not in (None, CHUNKER_VERSION):
-        print(f"The way files are read changed (v{meta(con, 'chunker')} -> v{CHUNKER_VERSION}). "
+    # An index built before versions were recorded has files but no "chunker": that's v1.
+    has_files = con.execute("SELECT 1 FROM files LIMIT 1").fetchone() is not None
+    built_with = meta(con, "chunker") or ("1" if has_files else CHUNKER_VERSION)
+    if built_with != CHUNKER_VERSION:
+        print(f"The way files are read changed (v{built_with} -> v{CHUNKER_VERSION}). "
               f"Re-reading every file.\n")
         con.execute("UPDATE files SET sha256=''")
     meta(con, "chunker", CHUNKER_VERSION)
