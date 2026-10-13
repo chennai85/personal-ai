@@ -1,7 +1,7 @@
 """
 A stand-in for Ollama's embedding endpoint, for testing memory.py without a Mac Studio.
 
-It is NOT a real model. It hashes words into 256 numbers and folds a few
+It is NOT a real model. /api/chat returns a canned answer that cites passage [1]. It hashes words into 256 numbers and folds a few
 synonyms together, so "invoice" and "bill" land near each other. Enough to test
 the plumbing: ingest, index, search, change and delete. Real quality is measured
 on the Studio with the real model.
@@ -43,12 +43,25 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/tags":
-            self._send({"models": [{"name": "qwen3-embedding:0.6b"}]})
+            self._send({"models": [{"name": "qwen3-embedding:0.6b"}, {"name": "qwen3.6:35b-a3b"}]})
         else:
             self._send({"version": "mock"})
 
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/api/chat":
+            # Stand-in answer: quote the first passage and cite it, streamed like Ollama
+            prompt = req["messages"][-1]["content"]
+            first = prompt.split("[1] (", 1)[-1].split("\n", 2)
+            words = ("From your files: " + (first[1][:80] if len(first) > 1 else "") + " [1]").split(" ")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.end_headers()
+            for w in words:
+                self.wfile.write((json.dumps({"message": {"content": w + " "}, "done": False}) + "\n").encode())
+            self.wfile.write((json.dumps({"message": {"content": ""}, "done": True,
+                                          "eval_count": len(words)}) + "\n").encode())
+            return
         inputs = req["input"] if isinstance(req["input"], list) else [req["input"]]
         # strip the query instruction, like a real model would read past it
         inputs = [t.split("Query: ", 1)[-1] for t in inputs]

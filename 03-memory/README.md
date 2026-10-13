@@ -1,8 +1,8 @@
 # Step 3: Memory
 
-A memory that belongs to me. My files live in `~/vault` on the Mac Studio. The AI builds a search index from them, finds the passages that matter, and (next) answers from them with citations.
+A memory that belongs to me. My files live in `~/vault` on the Mac Studio. The AI builds a search index from them, finds the passages that matter, and answers from them with citations.
 
-**Status:** parts 1–2 of 4 built and tested with a stand-in model: the vault, ingest, and search. Next: answers with citations, then remember / forget / why.
+**Status:** parts 1–3 of 4 built. Vault, ingest and search run on the Studio (42/42 checks, real model). `ask` is tested with a stand-in model; first real run next. Then part 4: remember / forget / why.
 
 ---
 
@@ -11,7 +11,7 @@ A memory that belongs to me. My files live in `~/vault` on the Mac Studio. The A
 ```
 ~/vault (my files)  ->  read  ->  split into passages  ->  embed  ->  index
                                                          (meaning)    (SQLite)
-question  ->  search by meaning  +  search by exact words  ->  best passages  ->  (next) the model answers
+question  ->  search by meaning  +  search by exact words  ->  best 8 passages  ->  Qwen answers, citing [1] [2]…
 ```
 
 | Piece | What it does | Choice |
@@ -22,6 +22,7 @@ question  ->  search by meaning  +  search by exact words  ->  best passages  ->
 | Embed | Turns each passage into numbers that capture its meaning | `qwen3-embedding:0.6b` on the Studio's Ollama (639 MB) |
 | Index | Stores passages for fast search | One SQLite file: FTS5 for exact words, vectors for meaning |
 | Search | Finds the best passages for a question | Both searches, merged by rank (reciprocal rank fusion) |
+| Answer | The main model reads the passages and answers | `qwen3.6:35b-a3b`. Only from the passages, cites each fact, says "Not in my memory" otherwise |
 
 **Why two searches:** meaning finds "the invoice" when the file says "statement." Exact words find `kWh`, names, amounts and dates that meaning search can blur. Each catches what the other misses.
 
@@ -54,16 +55,35 @@ Put files anywhere in `~/vault` (for example `~/vault/inbox/`), then run `ingest
 |---|---|
 | `ingest` | Index new and changed files, drop deleted ones |
 | `search "..."` | Top 5 passages. `-k 10` for more. `--mode meaning` or `--mode words` to see each search alone |
+| `ask "..."` | Qwen answers from the best 8 passages, with sources. `-k 12` to read more; `--think` to let it reason first (slower) |
 | `status` | What's indexed, what was skipped and why, is the model reachable |
 | `rebuild` | Delete the index and build it again (needed after changing the embedding model) |
 
 Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_template.md`).
 
+**Cleaning before indexing (v2):**
+- Template lines I haven't filled in (`⟪ ⟫`) are left out, so blank templates don't show up in search.
+- Header and footer lines that repeat on most pages of a PDF are removed, so the page with the answer isn't buried among look-alike pages. Found on a real year-end card statement: the page with the total didn't make the top 5.
+- When this cleaning changes, `ingest` re-reads every file once by itself.
+
 ---
 
-## Tested (stand-in model, Oct 13 2026)
+## First run on the Studio (Oct 13 2026, real model)
 
-`bash tests/test_memory.sh` runs 21 checks in a throwaway vault with a stand-in embedding server. All pass.
+| Measure | Result |
+|---|---|
+| `verify.sh` | 42 pass, 0 warn, 0 fail |
+| Ingest, 10 template files | 10 passages, 1.2 s (includes loading the model) |
+| Ingest, 2 real PDFs | 72 passages, 3.4 s |
+| Search | 0.05 s |
+| "old course" | Found `me/golf.md` with no shared words: meaning search works |
+| A misspelled question about last year's spending | Found the year-end card statement, pages 3–6 |
+| What went wrong | A blank template ranked #1, and the page with the total wasn't in the top 5. Both fixed in v2 (above) |
+| A 2012 W-2 | A scan: flagged, not read yet |
+
+## Tested (stand-in model)
+
+`bash tests/test_memory.sh` runs 29 checks in a throwaway vault with a stand-in model. All pass.
 
 | Check | Result |
 |---|---|
@@ -75,8 +95,12 @@ Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_temp
 | Changed file re-indexed; deleted file disappears from search | ✅ |
 | Same top answer after `rebuild` | ✅ |
 | Refuses to mix two embedding models in one index | ✅ |
+| Repeated PDF header removed; the page with the total ranks first | ✅ |
+| Blank template lines not searchable; filled-in lines are | ✅ |
+| `ask` streams an answer, cites [1], lists sources with page, reports timing | ✅ |
+| Changing the reader version re-reads every file | ✅ |
 
-**Not tested yet:** the real `qwen3-embedding` model, speed on the Studio, and the macOS-only checks (FileVault, `stat -f`). The stand-in proves the plumbing, not the quality.
+**Not tested yet:** `ask` with the real Qwen. The stand-in proves the plumbing, not the quality of answers.
 
 ## To measure on the Studio
 
@@ -84,6 +108,8 @@ Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_temp
 |---|---|
 | Speed | `ingest` prints passages and seconds. Note it for 10, then 100 files |
 | Recall | Write 10 questions about files I know. Is the right file in the top 3? |
+| Answers | Same 10 questions with `ask`. Right answer? Right citation? Does it say "Not in my memory" when it should? |
+| Speed | `ask` prints time to first word and full answer |
 | Meaning vs words | Run a few with `--mode meaning` and `--mode words`. Which misses what? |
 
 ---
@@ -94,7 +120,7 @@ Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_temp
 |---|---|
 | `WHY-THIS-DESIGN.md` | Decision record |
 | `vault_setup.sh` | Creates `~/vault` from the template, checks privacy and the model |
-| `memory.py` | ingest, search, status, rebuild |
+| `memory.py` | ingest, search, ask, status, rebuild |
 | `vault-template/` | The blank vault (safe to be public) |
 | `tests/` | `test_memory.sh`, a stand-in model, and made-up sample files |
 

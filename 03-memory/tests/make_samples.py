@@ -22,6 +22,18 @@ c.showPage()
 c.drawString(72, 720, "Usage was 812 kWh, up 4 percent from August.")
 c.save()
 
+# 1b. A statement whose header repeats on every page; the total is on page 1 only
+c = canvas.Canvas(str(out / "inbox" / "year-end-summary.pdf"), pagesize=letter)
+for n, body in enumerate(["Total spending for 2025: $12,345.67 across all categories.",
+                          "Dining: $2,100.00. Groceries: $3,400.00.",
+                          "Travel: $4,800.00. Golf green fees: $2,045.67."], 1):
+    c.drawString(72, 750, "Sample Bank 2025 Year-End Summary")
+    c.drawString(72, 735, "Includes charges from January 1 through December 31, 2025")
+    c.drawString(72, 700, body)
+    c.drawString(72, 60, f"Page {n} of 3")
+    c.showPage()
+c.save()
+
 # 2. A "scan": a PDF with only a picture, no text layer
 c = canvas.Canvas(str(out / "inbox" / "scanned-receipt.pdf"), pagesize=letter)
 c.rect(72, 600, 300, 100, fill=1)

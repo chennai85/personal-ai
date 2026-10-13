@@ -7,6 +7,7 @@ memory.py: my personal memory, on the Mac Studio.
 
     uv run memory.py ingest            read the vault, index what's new or changed
     uv run memory.py search "QUERY"    find passages (meaning + exact words)
+    uv run memory.py ask "QUESTION"    the main model answers from my files, with sources
     uv run memory.py status            what's indexed, and is everything working
     uv run memory.py rebuild           delete the index and build it again
 
@@ -35,6 +36,8 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 STANDARD = HERE.parent / "01-environment" / "standard.sh"
 SUPPORTED = {".md", ".txt", ".pdf", ".docx", ".eml", ".html", ".htm"}
+# Bump when the way files are read or split changes: every file is then re-read.
+CHUNKER_VERSION = "2"   # v2: skip blank template lines, strip repeated PDF headers/footers
 
 
 # ---------------------------------------------------------------------
@@ -60,6 +63,8 @@ def load_settings():
     s = {
         "vault": Path(get("VAULT_DIR", f"{home}/vault")),
         "embed_model": get("MODEL_EMBED", "qwen3-embedding:0.6b"),
+        "main_model": get("MODEL_MAIN", "qwen3.6:35b-a3b"),
+        "context": int(get("OLLAMA_CONTEXT_LENGTH", "32768")),
         "model_url": get("MODEL_BASE_URL", "http://localhost:11434").rstrip("/"),
         "chunk_words": int(get("MEMORY_CHUNK_WORDS", "500")),
         "overlap": int(get("MEMORY_CHUNK_OVERLAP", "80")),
@@ -155,7 +160,27 @@ def drop_file(con, path):
 # ---------------------------------------------------------------------
 def read_pdf(p):
     from pypdf import PdfReader
-    return [(i + 1, page.extract_text() or "") for i, page in enumerate(PdfReader(p).pages)]
+    pages = [(i + 1, page.extract_text() or "") for i, page in enumerate(PdfReader(p).pages)]
+    return strip_repeated_lines(pages)
+
+
+def strip_repeated_lines(pages, share=0.6):
+    """Drop header/footer lines that repeat on most pages ("Page 3", the same title).
+
+    Repeated lines make every page look alike to search, so the page that
+    actually answers the question gets buried. Digits are ignored when comparing,
+    so "Page 3 of 9" and "Page 4 of 9" count as the same line.
+    """
+    if len(pages) < 3:
+        return pages
+    norm = lambda line: re.sub(r"\d+", "#", line.strip().lower())
+    counts = {}
+    for _, text in pages:
+        for key in {norm(l) for l in text.splitlines() if l.strip()}:
+            counts[key] = counts.get(key, 0) + 1
+    repeated = {k for k, n in counts.items() if n >= share * len(pages)}
+    return [(pg, "\n".join(l for l in text.splitlines() if norm(l) not in repeated))
+            for pg, text in pages]
 
 
 def read_docx(p):
@@ -198,7 +223,40 @@ def read_file(p):
         return read_eml(p)
     if ext in (".html", ".htm"):
         return [(1, strip_html(p.read_text(errors="replace")))]
-    return [(1, p.read_text(errors="replace"))]
+    return [(1, skip_blanks(p.read_text(errors="replace")))]
+
+
+def skip_blanks(text):
+    """Leave out the parts of a template I haven't filled in yet.
+
+    Blank fields contain ⟪ ⟫. In a file that still has blanks, also leave out the
+    front matter (its "about:" line would match searches), table headers with no
+    rows, and headings with nothing under them. A filled-in file is indexed as written.
+    """
+    if "⟪" not in text:
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        end = next((i for i, l in enumerate(lines[1:], 1) if l.strip() == "---"), 0)
+        lines = lines[end + 1:]
+    is_sep = lambda l: re.fullmatch(r"\s*\|[-|\s:]*\|\s*", l) is not None
+    lines = [l for l in lines if "⟪" not in l and not is_sep(l) and l.strip()]
+    is_row = lambda l: l.lstrip().startswith("|")
+    is_head = lambda l: l.lstrip().startswith("#")
+    # a table header with no rows under it
+    lines = [l for i, l in enumerate(lines)
+             if not (is_row(l) and (i + 1 == len(lines) or not is_row(lines[i + 1]))
+                     and (i == 0 or not is_row(lines[i - 1])))]
+    # a heading with nothing under it (until the next heading of the same or higher level)
+    level = lambda l: len(l.lstrip()) - len(l.lstrip().lstrip("#"))
+    keep = []
+    for i, l in enumerate(lines):
+        if is_head(l):
+            nxt = lines[i + 1] if i + 1 < len(lines) else None
+            if nxt is None or (is_head(nxt) and level(nxt) <= level(l)):
+                continue
+        keep.append(l)
+    return "\n".join(keep)
 
 
 def chunk(pages):
@@ -238,6 +296,11 @@ def cmd_ingest(args):
                  f"{S['embed_model']}. Vectors from different models don't mix.\n"
                  f"Run: uv run memory.py rebuild")
     meta(con, "embed_model", S["embed_model"])
+    if meta(con, "chunker") not in (None, CHUNKER_VERSION):
+        print(f"The way files are read changed (v{meta(con, 'chunker')} -> v{CHUNKER_VERSION}). "
+              f"Re-reading every file.\n")
+        con.execute("UPDATE files SET sha256=''")
+    meta(con, "chunker", CHUNKER_VERSION)
 
     t0 = time.time()
     counts = dict(new=0, changed=0, same=0, removed=0, skipped=0, scan=0, chunks=0)
@@ -371,12 +434,68 @@ def cmd_search(args):
 
 
 # ---------------------------------------------------------------------
+# ask: the main model answers from the passages, and cites them
+# ---------------------------------------------------------------------
+ASK_RULES = """You answer questions about my own files, using ONLY the numbered passages below.
+- After every fact, cite the passage it came from, like [2]. No citation, no fact.
+- Copy numbers, dates and names exactly as written. Do not round or convert them.
+- If you add or compare numbers, show the working, so I can check it.
+- If the passages don't answer the question, say "Not in my memory." and name what kind of file would answer it.
+- Never write out a full account, card or ID number. Use the last 4 digits at most.
+- Be brief: answer first, then at most a few lines of detail.
+- You don't decide for me. If the question asks what I should do, lay out the facts and the choice."""
+
+
+def cmd_ask(args):
+    t0 = time.time()
+    hits = search(args.question, k=args.k)
+    t_search = time.time() - t0
+    if not hits:
+        print("Not in my memory. (Nothing indexed matches. Add files to the vault, then ingest.)")
+        return
+    blocks, sources = [], []
+    for i, h in enumerate(hits, 1):
+        where = h["path"] + (f" p.{h['page']}" if h["path"].lower().endswith(".pdf") else "")
+        sources.append(where)
+        blocks.append(f"[{i}] ({where})\n{h['text']}")
+    prompt = (f"{ASK_RULES}\n\nPASSAGES\n\n" + "\n\n".join(blocks) +
+              f"\n\nQUESTION: {args.question}")
+    body = {"model": S["main_model"], "stream": True, "think": args.think,
+            "options": {"temperature": 0.2, "num_ctx": S["context"]},
+            "messages": [{"role": "user", "content": prompt}]}
+    req = urllib.request.Request(f"{S['model_url']}/api/chat", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    t1, first, n_tokens = time.time(), None, 0
+    try:
+        with urllib.request.urlopen(req, timeout=600) as r:
+            for line in r:
+                if not line.strip():
+                    continue
+                msg = json.loads(line)
+                piece = msg.get("message", {}).get("content", "")
+                if piece:
+                    first = first or time.time()
+                    print(piece, end="", flush=True)
+                if msg.get("done"):
+                    n_tokens = msg.get("eval_count", 0)
+    except Exception as e:
+        sys.exit(f"\nSTOP: could not reach {S['main_model']} at {S['model_url']} "
+                 f"({e.__class__.__name__}: {e})")
+    print("\n\nSources")
+    for i, src in enumerate(sources, 1):
+        print(f"  [{i}] {src}")
+    wait = (first - t1) if first else 0
+    print(f"\n(search {t_search:.2f} s · first word {wait:.1f} s · answer {time.time() - t1:.1f} s"
+          f"{f' · {n_tokens} tokens' if n_tokens else ''} · {S['main_model']})")
+
+
+# ---------------------------------------------------------------------
 # status, rebuild
 # ---------------------------------------------------------------------
 def cmd_status(args):
     print(f"Vault:  {S['vault']}  {'(found)' if S['vault'].is_dir() else '(MISSING)'}")
     print(f"Index:  {S['index']}  {'(%.1f MB)' % (S['index'].stat().st_size / 1e6) if S['index'].exists() else '(not built)'}")
-    print(f"Model:  {S['embed_model']} at {S['model_url']}")
+    print(f"Model:  {S['embed_model']} (search) · {S['main_model']} (answers) at {S['model_url']}")
     try:
         with urllib.request.urlopen(f"{S['model_url']}/api/tags", timeout=3) as r:
             names = [m["name"] for m in json.loads(r.read())["models"]]
@@ -414,6 +533,11 @@ def main():
     s.add_argument("--mode", choices=["both", "meaning", "words"], default="both",
                    help="meaning only, exact words only, or both (default)")
     s.set_defaults(f=cmd_search)
+    a_ = sub.add_parser("ask", help="answer a question from my files, with sources")
+    a_.add_argument("question")
+    a_.add_argument("-k", type=int, default=8, help="how many passages to read (default 8)")
+    a_.add_argument("--think", action="store_true", help="let the model think first (slower)")
+    a_.set_defaults(f=cmd_ask)
     sub.add_parser("status", help="what's indexed").set_defaults(f=cmd_status)
     sub.add_parser("rebuild", help="delete the index and rebuild").set_defaults(f=cmd_rebuild)
     a = p.parse_args()

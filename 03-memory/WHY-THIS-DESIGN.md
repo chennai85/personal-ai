@@ -28,6 +28,9 @@ This is the shift I call **BuWe**: the machine carries the understanding (buddhi
 | Model change | Refused until `rebuild` | Vectors from two models can't be compared |
 | Scans | Flagged, not read | Reading images (Qwen vision) comes later |
 | Testing | A stand-in embedding server + made-up files | The plumbing is tested anywhere; quality is measured on the Studio |
+| Answers | Main model (`qwen3.6:35b-a3b`), best 8 passages, thinking off by default | Depth for reading; fast enough. `--think` when a question needs reasoning |
+| Answer rules | Only from the passages; cite every fact; copy numbers exactly; show any math; "Not in my memory" otherwise; never print full account numbers; never decide | The machine carries the understanding, I keep the discernment. Citations let me check in seconds |
+| Cleaning (v2) | Skip unfilled template lines; strip headers/footers repeated on most PDF pages | Both found on the first real run: noise outranked the answer |
 
 ---
 
@@ -35,7 +38,6 @@ This is the shift I call **BuWe**: the machine carries the understanding (buddhi
 
 | Later | Why |
 |---|---|
-| Answers with citations (`ask`) | Part 3: the model reads the passages and cites file and page |
 | `remember`, `forget`, `why` | Part 4: write-back and control |
 | Access from the other Macs and the phone | A small service on the Studio, over Tailscale only |
 | Encrypted backup + restore test | Before real data goes in |
