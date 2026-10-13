@@ -98,7 +98,7 @@ if [ -n "${MODEL_BASE_URL:-}" ]; then
   if curl -s -m 3 "$MODEL_BASE_URL/api/version" >/dev/null 2>&1; then
     rec PASS "model server reachable" "$MODEL_BASE_URL ($(curl -s -m 3 "$MODEL_BASE_URL/api/version" | sed 's/[{}"]//g'))"
     TAGS="$(curl -s -m 5 "$MODEL_BASE_URL/api/tags" 2>/dev/null)"
-    for m in $MODEL_MAIN $MODEL_FAST; do
+    for m in $MODEL_MAIN $MODEL_FAST $MODEL_EMBED; do
       if printf '%s' "$TAGS" | grep -q "\"name\":\"$m\""; then rec PASS "model available" "$m"
       else rec WARN "model available" "$m not on the server (run server_setup.sh on the Studio)"; fi
     done
@@ -121,6 +121,24 @@ if [ "$PROFILE" = "studio" ]; then
     else rec WARN "ollama listens" "not on $OLLAMA_LISTEN:$OLLAMA_PORT (re-run server_setup.sh)"; fi
   else
     rec WARN "ollama service" "not set up (Step 2: server_setup.sh)"
+  fi
+fi
+
+# ---------- memory vault (Studio only, Step 3) ----------
+# WARN, not FAIL, until Step 3 is set up, so earlier steps still pass.
+if [ "$PROFILE" = "studio" ]; then
+  if [ -d "$VAULT_DIR" ]; then
+    rec PASS "vault exists" "$VAULT_DIR"
+    PERM="$(stat -f %Lp "$VAULT_DIR" 2>/dev/null || stat -c %a "$VAULT_DIR")"
+    if [ "$PERM" = "700" ]; then rec PASS "vault private" "permissions 700"; else rec FAIL "vault private" "permissions $PERM, want 700 (chmod 700 $VAULT_DIR)"; fi
+    INREPO=0; d="$VAULT_DIR"
+    while [ "$d" != "/" ]; do [ -d "$d/.git" ] && INREPO=1; d="$(dirname "$d")"; done
+    if [ "$INREPO" = "0" ]; then rec PASS "vault outside git" "not inside any repo"; else rec FAIL "vault outside git" "the vault is inside a git repo"; fi
+    if fdesetup status 2>/dev/null | grep -q "On"; then rec PASS "FileVault" "on (disk encrypted)"; else rec FAIL "FileVault" "off: System Settings > Privacy & Security > FileVault"; fi
+    if [ -f "$VAULT_INDEX" ]; then rec PASS "memory index" "$VAULT_INDEX ($(du -h "$VAULT_INDEX" | cut -f1))"
+    else rec WARN "memory index" "not built yet (uv run memory.py ingest)"; fi
+  else
+    rec WARN "vault exists" "$VAULT_DIR missing (Step 3: bash 03-memory/vault_setup.sh)"
   fi
 fi
 

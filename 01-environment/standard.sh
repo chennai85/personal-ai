@@ -1,12 +1,12 @@
 #!/bin/bash
 # shellcheck disable=SC2034  # variables are used by setup.sh and verify.sh
 # =====================================================================
-# Driving Range Standard v1.2
+# Driving Range Standard v1.3
 # The single source of truth for how every machine is set up.
 # setup.sh and verify.sh both read this file. Change values here only.
 # =====================================================================
 
-STANDARD_VERSION="1.2"
+STANDARD_VERSION="1.3"
 
 # Where all work lives
 DR_ROOT="$HOME/driving-range"
@@ -32,12 +32,23 @@ MODEL_DIRS="$HOME/.ollama/models $HOME/.cache/huggingface/hub"
 # ---------------------------------------------------------------------
 MODEL_MAIN="qwen3.6:35b-a3b"     # main model: depth
 MODEL_FAST="gemma4:e4b"          # fast model: quick tasks, fallback
+MODEL_EMBED="qwen3-embedding:0.6b"  # embedding model: turns text into meaning (Step 3)
 OLLAMA_PORT=11434
 OLLAMA_LISTEN="0.0.0.0"          # accept requests from other Macs (see README security note)
 OLLAMA_CONTEXT_LENGTH=32768      # how much text one conversation can hold
 OLLAMA_KEEP_ALIVE="30m"          # keep a model in memory 30 minutes after last use
 OLLAMA_NUM_PARALLEL=2            # answer two requests at once per model
-OLLAMA_MAX_LOADED_MODELS=2       # main + fast can both stay loaded
+OLLAMA_MAX_LOADED_MODELS=3       # main + fast + embedding can all stay loaded (v1.3: was 2)
+
+# ---------------------------------------------------------------------
+# Memory (Step 3). The vault lives on the Mac Studio only.
+# It holds my data, so it must never be inside a git repo.
+# Why this design: personal-ai/03-memory/WHY-THIS-DESIGN.md
+# ---------------------------------------------------------------------
+VAULT_DIR="${VAULT_DIR:-$HOME/vault}"  # my files: notes, documents, decisions
+VAULT_INDEX="$VAULT_DIR/.index/memory.db"  # search index, rebuilt from the files
+MEMORY_CHUNK_WORDS=500           # passage size for search
+MEMORY_CHUNK_OVERLAP=80          # words shared between neighbouring passages
 
 # ---------------------------------------------------------------------
 # Profiles: one per machine.
