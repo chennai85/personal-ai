@@ -8,7 +8,7 @@
 #   1. Installs Ollama (the model server) with Homebrew
 #   2. Runs it as a background service that starts at login
 #      and accepts requests from your other Macs
-#   3. Downloads the two models named in standard.sh
+#   3. Downloads the models named in standard.sh (main, fast, embedding)
 #
 # Safe to run more than once. To switch models, edit MODEL_MAIN /
 # MODEL_FAST in 01-environment/standard.sh and run this again.
@@ -105,7 +105,7 @@ ok "server answering: $(curl -s "http://localhost:$OLLAMA_PORT/api/version")"
 # ---------------------------------------------------------------------
 step "3. Download models"
 echo "    The main model is about 24 GB. This can take a while."
-for m in "$MODEL_MAIN" "$MODEL_FAST"; do
+for m in "$MODEL_MAIN" "$MODEL_FAST" "$MODEL_EMBED"; do  # embedding model added in v1.3 (Step 3)
   if "$OLLAMA_BIN" list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$m"; then
     ok "$m already downloaded"
   else
