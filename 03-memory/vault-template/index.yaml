@@ -1,0 +1,14 @@
+# Which vault files the AI reads for which kind of document.
+# Always loaded: me/profile.md, rules/always-check.md, decisions/log.md
+always:
+  - me/profile.md
+  - rules/always-check.md
+  - decisions/log.md
+
+topics:
+  travel:   [me/travel.md, me/money.md, me/golf.md, people/]
+  golf:     [me/golf.md, people/]
+  bill:     [me/money.md]
+  contract: [me/money.md]
+  purchase: [me/money.md]
+  news:     [me/interests.md]
