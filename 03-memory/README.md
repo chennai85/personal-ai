@@ -2,7 +2,7 @@
 
 A memory that belongs to me. My files live in `~/vault` on the Mac Studio. The AI builds a search index from them, finds the passages that matter, and answers from them with citations.
 
-**Status:** parts 1–3 of 4 built. Vault, ingest and search run on the Studio (42/42 checks, real model). `ask` is tested with a stand-in model; first real run next. Then part 4: remember / forget / why.
+**Status:** parts 1–3 of 4 built and running on the Studio with the real models: vault, ingest, search, and `ask` with sources. Paused here to document. Next: a 10-question recall test, then part 4: remember / forget / why.
 
 ---
 
@@ -80,10 +80,16 @@ Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_temp
 | A misspelled question about last year's spending | Found the year-end card statement, pages 3–6 |
 | What went wrong | A blank template ranked #1, and the page with the total wasn't in the top 5. Both fixed in v2 (above) |
 | A 2012 W-2 | A scan: flagged, not read yet |
+| After v2 + `rebuild` | Blank templates gone from results. All 8 passages for the spending question came from the right statement, the page with the total among them (#4) |
+| `ask` "what is my golf handicap" | **"Not in my memory."** The field is blank, and it didn't guess |
+| `ask` "how much did I spend last year" | Answered from the year-end statement, with page citations |
+| `ask` speed | First word 1.2–1.7 s · full answer 1.3–2.8 s · `qwen3.6:35b-a3b` |
+| Bug found | The v2 upgrade didn't trigger: indexes built before versions were recorded looked "current". Worked around with `rebuild`, fixed so they upgrade by themselves |
+| Lesson | Search snippets show what's in the file. Don't paste them into a cloud chat; share file names and pages only |
 
 ## Tested (stand-in model)
 
-`bash tests/test_memory.sh` runs 29 checks in a throwaway vault with a stand-in model. All pass.
+`bash tests/test_memory.sh` runs 30 checks in a throwaway vault with a stand-in model. All pass.
 
 | Check | Result |
 |---|---|
@@ -99,8 +105,9 @@ Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_temp
 | Blank template lines not searchable; filled-in lines are | ✅ |
 | `ask` streams an answer, cites [1], lists sources with page, reports timing | ✅ |
 | Changing the reader version re-reads every file | ✅ |
+| An index from before versions were recorded upgrades too | ✅ |
 
-**Not tested yet:** `ask` with the real Qwen. The stand-in proves the plumbing, not the quality of answers.
+**Not measured yet:** recall over a set of questions (is the right page in the top 3?) and answer accuracy. That's the next test.
 
 ## To measure on the Studio
 
