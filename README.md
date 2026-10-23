@@ -26,7 +26,7 @@ A small business is a household with employees, so Phase 2 is the foundation for
 |---|---|---|---|
 | 1 | [The Workbench](01-environment/) | A clean, verified AI environment on every Mac | ✅ Done on all three Macs |
 | 2 | [A Local Model](02-local-model/) | A private model on the Mac Studio, shared with the other Macs | ✅ Done: ~130 tokens/sec, all Macs pass. [Why this model](02-local-model/WHY-THIS-MODEL.md) |
-| 3 | [Memory](03-memory/) | A memory layer that belongs to me | In progress: vault, ingest, search on the Studio; answers with sources next |
+| 3 | [Memory](03-memory/) | A memory layer that belongs to me | Parts 1–3 working on the Studio: search my files, answers with sources in ~2 s. Next: recall test, remember / forget |
 | 4 | Values | A short set of rules the AI must follow | Planned |
 | 5 | First Agents | Trading research and life admin | Planned |
 
