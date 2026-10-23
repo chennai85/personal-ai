@@ -63,6 +63,22 @@ check "answer cites a passage"   grep -q "\[1\]" <<<"$OUT"
 check "sources listed with page" grep -q "\[1\] inbox/year-end-summary.pdf p.1" <<<"$OUT"
 check "timing reported"          grep -q "first word" <<<"$OUT"
 
+echo "==> recall test"
+mem recall >/dev/null
+check "recall creates questions file" test -f "$VAULT_DIR/.eval/questions.txt"
+cat >> "$VAULT_DIR/.eval/questions.txt" <<'Q'
+When is the invoice due? | electric-bill |
+What deductible does the auto policy have? | auto-renewal | 500
+What is my golf handicap? | NONE |
+Q
+OUT="$(mem recall --no-ask)"
+check "search-only scores top 3"      grep -q "Right file in top 3: 2/2" <<<"$OUT"
+OUT="$(mem recall --yes)"
+check "full run scores answers"        grep -q "Answer right:" <<<"$OUT"
+check "honesty question scored"        grep -q "Said 'Not in my memory' when it should: 0/1" <<<"$OUT"
+check "results saved in vault"         bash -c "ls '$VAULT_DIR'/.eval/results-*.txt"
+check "eval folder never indexed"      bash -c "cd '$HERE' && ! uv run --quiet memory.py search 'golf handicap' --mode words | grep -q '.eval'"
+
 echo "==> re-ingest, change, delete"
 OUT="$(mem ingest)"
 check "nothing re-embedded when unchanged" grep -q "new 0 · changed 0" <<<"$OUT"
