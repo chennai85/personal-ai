@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["numpy>=1.26", "pypdf>=4.0", "python-docx>=1.1"]
+# dependencies = ["numpy>=1.26", "pypdf>=4.0", "python-docx>=1.1", "fonttools>=4.40"]
 # ///
 """
 memory.py: my personal memory, on the Mac Studio.
@@ -8,6 +8,7 @@ memory.py: my personal memory, on the Mac Studio.
     uv run memory.py ingest            read the vault, index what's new or changed
     uv run memory.py search "QUERY"    find passages (meaning + exact words)
     uv run memory.py ask "QUESTION"    the main model answers from my files, with sources
+    uv run memory.py recall            score my own test questions (~/vault/.eval/questions.txt)
     uv run memory.py status            what's indexed, and is everything working
     uv run memory.py rebuild           delete the index and build it again
 
@@ -18,6 +19,7 @@ Settings come from 01-environment/standard.sh (the single source of truth).
 """
 
 import argparse
+import logging
 import email
 import email.policy
 import hashlib
@@ -32,6 +34,10 @@ import urllib.request
 from pathlib import Path
 
 import numpy as np
+
+# PDFs from the real world are messy. pypdf reports every small repair it makes
+# ("Ignoring wrong pointing object ..."); the text still comes out. Keep only errors.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 HERE = Path(__file__).resolve().parent
 STANDARD = HERE.parent / "01-environment" / "standard.sh"
@@ -449,26 +455,33 @@ ASK_RULES = """You answer questions about my own files, using ONLY the numbered 
 - You don't decide for me. If the question asks what I should do, lay out the facts and the choice."""
 
 
-def cmd_ask(args):
+def answer(question, k=8, think=False, show=True):
+    """Search, then have the main model answer from the passages.
+
+    Returns {"text", "sources", "t_search", "wait", "total", "tokens"}.
+    With show=True the answer streams to the screen as it's written.
+    """
     t0 = time.time()
-    hits = search(args.question, k=args.k)
+    hits = search(question, k=k)
     t_search = time.time() - t0
     if not hits:
-        print("Not in my memory. (Nothing indexed matches. Add files to the vault, then ingest.)")
-        return
+        text = "Not in my memory. (Nothing indexed matches. Add files to the vault, then ingest.)"
+        if show:
+            print(text)
+        return {"text": text, "sources": [], "t_search": t_search, "wait": 0, "total": 0, "tokens": 0}
     blocks, sources = [], []
     for i, h in enumerate(hits, 1):
         where = h["path"] + (f" p.{h['page']}" if h["path"].lower().endswith(".pdf") else "")
         sources.append(where)
         blocks.append(f"[{i}] ({where})\n{h['text']}")
     prompt = (f"{ASK_RULES}\n\nPASSAGES\n\n" + "\n\n".join(blocks) +
-              f"\n\nQUESTION: {args.question}")
-    body = {"model": S["main_model"], "stream": True, "think": args.think,
+              f"\n\nQUESTION: {question}")
+    body = {"model": S["main_model"], "stream": True, "think": think,
             "options": {"temperature": 0.2, "num_ctx": S["context"]},
             "messages": [{"role": "user", "content": prompt}]}
     req = urllib.request.Request(f"{S['model_url']}/api/chat", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
-    t1, first, n_tokens = time.time(), None, 0
+    t1, first, n_tokens, parts = time.time(), None, 0, []
     try:
         with urllib.request.urlopen(req, timeout=600) as r:
             for line in r:
@@ -478,18 +491,134 @@ def cmd_ask(args):
                 piece = msg.get("message", {}).get("content", "")
                 if piece:
                     first = first or time.time()
-                    print(piece, end="", flush=True)
+                    parts.append(piece)
+                    if show:
+                        print(piece, end="", flush=True)
                 if msg.get("done"):
                     n_tokens = msg.get("eval_count", 0)
     except Exception as e:
         sys.exit(f"\nSTOP: could not reach {S['main_model']} at {S['model_url']} "
                  f"({e.__class__.__name__}: {e})")
+    return {"text": "".join(parts), "sources": sources, "t_search": t_search,
+            "wait": (first - t1) if first else 0, "total": time.time() - t1, "tokens": n_tokens}
+
+
+def cmd_ask(args):
+    a = answer(args.question, k=args.k, think=args.think)
+    if not a["sources"]:
+        return
     print("\n\nSources")
-    for i, src in enumerate(sources, 1):
+    for i, src in enumerate(a["sources"], 1):
         print(f"  [{i}] {src}")
-    wait = (first - t1) if first else 0
-    print(f"\n(search {t_search:.2f} s · first word {wait:.1f} s · answer {time.time() - t1:.1f} s"
-          f"{f' · {n_tokens} tokens' if n_tokens else ''} · {S['main_model']})")
+    tokens = f" · {a['tokens']} tokens" if a["tokens"] else ""
+    print(f"\n(search {a['t_search']:.2f} s · first word {a['wait']:.1f} s · answer {a['total']:.1f} s"
+          f"{tokens} · {S['main_model']})")
+
+
+# ---------------------------------------------------------------------
+# recall: score my own questions about my own files
+# ---------------------------------------------------------------------
+EVAL_DIR = S["vault"] / ".eval"          # inside the vault, never indexed (starts with ".")
+QUESTIONS = EVAL_DIR / "questions.txt"
+QUESTIONS_TEMPLATE = """# My recall test. Lives in the vault, on the Studio. Never paste it into a cloud chat.
+#
+# One question per line:
+#     question | part of the file name it should come from | words the answer must contain (optional)
+#
+# Use NONE as the file for a question my files can't answer: it passes only if
+# the answer says "Not in my memory".
+#
+# Examples (delete the # to use them, and change them to my own files):
+# What is my golf handicap? | NONE |
+# When does the NDA expire? | NDA |
+# What was my total spending in 2025? | YearEndSummary | $
+"""
+
+
+def load_questions():
+    rows = []
+    for n, line in enumerate(QUESTIONS.read_text().splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        cols = [c.strip() for c in line.split("|")] + ["", ""]
+        if not cols[0] or not cols[1]:
+            sys.exit(f"STOP: line {n} of {QUESTIONS} needs at least: question | file")
+        must = [w.strip() for w in cols[2].split(",") if w.strip()]
+        rows.append({"q": cols[0], "file": cols[1], "must": must})
+    return rows
+
+
+def cmd_recall(args):
+    EVAL_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(EVAL_DIR, 0o700)
+    if not QUESTIONS.exists() or args.init:
+        if QUESTIONS.exists():
+            sys.exit(f"{QUESTIONS} already exists. Edit it, then: uv run memory.py recall")
+        QUESTIONS.write_text(QUESTIONS_TEMPLATE)
+        os.chmod(QUESTIONS, 0o600)
+        print(f"Created {QUESTIONS}\nWrite 10 questions in it (open -e {QUESTIONS}), then run:\n"
+              f"  uv run memory.py recall")
+        return
+    rows = load_questions()
+    if not rows:
+        sys.exit(f"No questions yet in {QUESTIONS}. Lines starting with # are ignored.")
+
+    results = []
+    for i, r in enumerate(rows, 1):
+        none = r["file"].upper() == "NONE"
+        hits = search(r["q"], k=3)
+        rank = next((j for j, h in enumerate(hits, 1) if r["file"].lower() in h["path"].lower()), None)
+        res = {"n": i, "none": none, "rank": rank, "right": None, "secs": 0.0}
+        if not args.no_ask:
+            print(f"\n── Q{i}. {r['q']}")
+            a = answer(r["q"], k=args.k, show=True)
+            res["secs"] = a["total"]
+            said_none = "not in my memory" in a["text"].lower()
+            if none:
+                res["right"] = said_none
+                print(f"\n   → {'PASS' if said_none else 'FAIL'}: expected \"Not in my memory\"")
+            else:
+                missing = [w for w in r["must"] if w.lower() not in a["text"].lower()]
+                if missing:
+                    res["right"] = False
+                    print(f"\n   → FAIL: answer is missing {missing}")
+                elif said_none:
+                    res["right"] = False
+                    print("\n   → FAIL: said \"Not in my memory\" but the file is there")
+                else:
+                    print("\n   Sources: " + "; ".join(a["sources"][:3]))
+                    reply = "" if args.yes else input("   Is this answer right? [y/n] ").strip().lower()
+                    res["right"] = args.yes or reply.startswith("y")
+        results.append(res)
+
+    # Score. Only numbers, no questions or answers, so it's safe to share.
+    found = [r for r in results if not r["none"]]
+    top3 = sum(1 for r in found if r["rank"])
+    top1 = sum(1 for r in found if r["rank"] == 1)
+    lines = [f"Recall test · {time.strftime('%Y-%m-%d %H:%M')} · {len(results)} questions · "
+             f"{S['embed_model']} + {S['main_model']}"]
+    if found:
+        lines.append(f"  Right file in top 3: {top3}/{len(found)}   (#1: {top1}/{len(found)})")
+    if not args.no_ask:
+        right = sum(1 for r in found if r["right"])
+        honest = [r for r in results if r["none"]]
+        if found:
+            lines.append(f"  Answer right:        {right}/{len(found)}")
+        if honest:
+            lines.append(f"  Said 'Not in my memory' when it should: "
+                         f"{sum(1 for r in honest if r['right'])}/{len(honest)}")
+        secs = [r["secs"] for r in results if r["secs"]]
+        if secs:
+            lines.append(f"  Answer time:         {min(secs):.1f}–{max(secs):.1f} s "
+                         f"(average {sum(secs) / len(secs):.1f} s)")
+    lines.append("  Per question: " + "  ".join(
+        f"Q{r['n']}:{'—' if r['none'] else (r['rank'] or 'miss')}"
+        f"{'' if r['right'] is None else ('✓' if r['right'] else '✗')}" for r in results))
+    report = "\n".join(lines)
+    print("\n" + report)
+    out = EVAL_DIR / f"results-{time.strftime('%Y%m%d-%H%M%S')}.txt"
+    out.write_text(report + "\n")
+    print(f"\nSaved: {out}\nSafe to share: the lines above are numbers only.")
 
 
 # ---------------------------------------------------------------------
@@ -541,6 +670,12 @@ def main():
     a_.add_argument("-k", type=int, default=8, help="how many passages to read (default 8)")
     a_.add_argument("--think", action="store_true", help="let the model think first (slower)")
     a_.set_defaults(f=cmd_ask)
+    rc = sub.add_parser("recall", help="score my own test questions")
+    rc.add_argument("--init", action="store_true", help="create the questions file")
+    rc.add_argument("--no-ask", action="store_true", help="only check search (fast, no model answers)")
+    rc.add_argument("--yes", action="store_true", help="mark every answer right without asking (for tests)")
+    rc.add_argument("-k", type=int, default=8, help="passages per answer (default 8)")
+    rc.set_defaults(f=cmd_recall)
     sub.add_parser("status", help="what's indexed").set_defaults(f=cmd_status)
     sub.add_parser("rebuild", help="delete the index and rebuild").set_defaults(f=cmd_rebuild)
     a = p.parse_args()

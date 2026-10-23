@@ -56,6 +56,7 @@ Put files anywhere in `~/vault` (for example `~/vault/inbox/`), then run `ingest
 | `ingest` | Index new and changed files, drop deleted ones |
 | `search "..."` | Top 5 passages. `-k 10` for more. `--mode meaning` or `--mode words` to see each search alone |
 | `ask "..."` | Qwen answers from the best 8 passages, with sources. `-k 12` to read more; `--think` to let it reason first (slower) |
+| `recall` | Score my own test questions: right file in the top 3? Right answer? "Not in my memory" when it should? `--no-ask` checks search only (fast) |
 | `status` | What's indexed, what was skipped and why, is the model reachable |
 | `rebuild` | Delete the index and build it again (needed after changing the embedding model) |
 
@@ -108,6 +109,21 @@ Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_temp
 | An index from before versions were recorded upgrades too | ✅ |
 
 **Not measured yet:** recall over a set of questions (is the right page in the top 3?) and answer accuracy. That's the next test.
+
+## The recall test
+
+My questions about my own files, scored. The questions and results live in `~/vault/.eval/`, inside the vault and never indexed.
+
+```bash
+uv run memory.py recall            # first run creates ~/vault/.eval/questions.txt
+open -e ~/vault/.eval/questions.txt
+uv run memory.py recall --no-ask   # search only: is the right file in the top 3?
+uv run memory.py recall            # full: answers stream, I mark each right or wrong
+```
+
+One question per line: `question | part of the file name | words the answer must contain (optional)`. Use `NONE` as the file for a question my files can't answer; it passes only if the answer says "Not in my memory".
+
+The summary at the end is numbers only, so it's safe to share. The questions and answers stay on the Studio.
 
 ## To measure on the Studio
 
