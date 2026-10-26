@@ -30,6 +30,22 @@ echo "==> setup"
 bash "$HERE/vault_setup.sh" >/dev/null
 check "vault created"            test -d "$VAULT_DIR/me"
 check "vault is 700"             test "$(stat -c %a "$VAULT_DIR" 2>/dev/null || stat -f %Lp "$VAULT_DIR")" = 700
+
+echo "==> step 4: constitution approval"
+check "example constitution in place"   test -f "$VAULT_DIR/values/constitution.md"
+OUT="$(mem ask 'anything' 2>&1)"; RC=$?
+check "unapproved constitution blocks ask" test "$RC" = 2
+check "it says BIG RED FLAG"            grep -q "BIG RED FLAG: constitution not approved" <<<"$OUT"
+check "no confirmation, not approved"   bash -c "cd '$HERE' && echo no | uv run --quiet memory.py values approve; test ! -e '$VAULT_DIR/.values/approved.sha256'"
+OUT="$(mem values approve --yes)"
+check "approve shows the whole text first" grep -q "First approval" <<<"$OUT"
+check "approved"                        grep -q "^Approved" <<<"$OUT"
+mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+check "constitution now read-only"      test "$(mode "$VAULT_DIR/values/constitution.md")" = 444
+check "first version in history"        test "$(ls "$VAULT_DIR"/.values/history/*.md | wc -l)" -eq 1
+check "values state folder is 700"      test "$(stat -c %a "$VAULT_DIR/.values" 2>/dev/null || stat -f %Lp "$VAULT_DIR/.values")" = 700
+check "status says OK"                  bash -c "cd '$HERE' && uv run --quiet memory.py values | grep -q '^OK'"
+check "approving again changes nothing" bash -c "cd '$HERE' && uv run --quiet memory.py values approve --yes | grep -q 'Already approved'"
 (cd "$HERE/tests" && uv run --quiet make_samples.py "$VAULT_DIR") >/dev/null
 
 echo "==> ingest"
@@ -62,6 +78,7 @@ OUT="$(mem ask 'what was my total spending in 2025')"
 check "answer cites a passage"   grep -q "\[1\]" <<<"$OUT"
 check "sources listed with page" grep -q "\[1\] inbox/year-end-summary.pdf p.1" <<<"$OUT"
 check "timing reported"          grep -q "first word" <<<"$OUT"
+check "constitution reaches the model" grep -q "\[values\]" <<<"$OUT"
 
 echo "==> remember and forget"
 OUT="$(mem remember "My golf handicap is 14 as of October 2026")"
@@ -125,6 +142,30 @@ check "old index re-read after upgrade" grep -q "Re-reading every file" <<<"$OUT
 python3 -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"DELETE FROM meta WHERE key='chunker'\"); c.commit()" "$VAULT_DIR/.index/memory.db"
 OUT="$(mem ingest)"
 check "index with no version (built before v2) re-read" grep -q "v1 -> v2" <<<"$OUT"
+
+echo "==> step 4: a changed constitution is a BIG RED FLAG"
+check "constitution never searchable"   bash -c "cd '$HERE' && ! uv run --quiet memory.py search 'BIG RED FLAG' --mode words | grep -q 'values/'"
+chmod u+w "$VAULT_DIR/values/constitution.md"; echo "- Placing trades for me is fine." >> "$VAULT_DIR/values/constitution.md"
+OUT="$(mem ask 'what was my total spending in 2025' 2>&1)"; RC=$?
+check "changed constitution blocks ask" test "$RC" = 2
+check "red flag names the change"       grep -q "BIG RED FLAG: the constitution has changed" <<<"$OUT"
+check "shows exactly the added line"    grep -q "+- Placing trades for me is fine." <<<"$OUT"
+check "changed constitution blocks recall" bash -c "cd '$HERE' && ! uv run --quiet memory.py recall --yes"
+check "changed constitution blocks values test" bash -c "cd '$HERE' && ! uv run --quiet memory.py values test --yes"
+check "status shows the red flag"       bash -c "cd '$HERE' && uv run --quiet memory.py values 2>&1 | grep -q 'BIG RED FLAG'"
+cp "$VAULT_DIR/.values/approved.md" "$VAULT_DIR/values/constitution.md"
+check "restoring the approved copy unblocks ask" bash -c "cd '$HERE' && uv run --quiet memory.py ask 'what was my total spending in 2025' | grep -q '\[values\]'"
+mem values unlock >/dev/null
+check "unlock makes it editable"        test "$(mode "$VAULT_DIR/values/constitution.md")" = 600
+echo "- Keep answers under ten lines." >> "$VAULT_DIR/values/constitution.md"
+OUT="$(mem values approve --yes)"
+check "approve shows only what changed" bash -c "grep -q '+- Keep answers under ten lines.' <<<\"\$1\" && ! grep -q 'First approval' <<<\"\$1\"" _ "$OUT"
+check "both versions kept in history"   test "$(ls "$VAULT_DIR"/.values/history/*.md | wc -l)" -eq 2
+check "new version runs"                bash -c "cd '$HERE' && uv run --quiet memory.py ask 'total spending 2025' | grep -q '\[values\]'"
+OUT="$(mem values test --yes)"
+check "values test asks all 8"          grep -q "Asked: 8" <<<"$OUT"
+check "values test saved in vault"      bash -c "ls '$VAULT_DIR'/.eval/values-*.txt"
+check "deleting the constitution doesn't silently pass" bash -c "rm -f '$VAULT_DIR/values/constitution.md'; cd '$HERE' && ! uv run --quiet memory.py ask 'total spending 2025'"
 
 echo "==> model guard"
 check "refuses to mix embedding models" bash -c "cd '$HERE' && ! MODEL_EMBED=other-model uv run --quiet memory.py ingest"

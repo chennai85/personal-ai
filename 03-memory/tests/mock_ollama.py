@@ -53,7 +53,8 @@ class H(BaseHTTPRequestHandler):
             # Stand-in answer: quote the first passage and cite it, streamed like Ollama
             prompt = req["messages"][-1]["content"]
             first = prompt.split("[1] (", 1)[-1].split("\n", 2)
-            words = ("From your files: " + (first[1][:80] if len(first) > 1 else "") + " [1]").split(" ")
+            tag = "[values] " if prompt.startswith("MY CONSTITUTION") else ""
+            words = (tag + "From your files: " + (first[1][:80] if len(first) > 1 else "") + " [1]").split(" ")
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson")
             self.end_headers()
