@@ -9,6 +9,9 @@ memory.py: my personal memory, on the Mac Studio.
     uv run memory.py search "QUERY"    find passages (meaning + exact words)
     uv run memory.py ask "QUESTION"    the main model answers from my files, with sources
     uv run memory.py recall            score my own test questions (~/vault/.eval/questions.txt)
+    uv run memory.py remember "TEXT"   save something I tell it, in my own words
+    uv run memory.py forget FILE       delete a file from the vault and from memory
+    uv run memory.py forget --note "WORDS"   remove remembered lines that contain WORDS
     uv run memory.py status            what's indexed, and is everything working
     uv run memory.py rebuild           delete the index and build it again
 
@@ -19,6 +22,8 @@ Settings come from 01-environment/standard.sh (the single source of truth).
 """
 
 import argparse
+import contextlib
+import io
 import logging
 import email
 import email.policy
@@ -130,6 +135,7 @@ def open_db():
     con = sqlite3.connect(S["index"])
     con.executescript("""
         PRAGMA journal_mode=WAL;
+        PRAGMA secure_delete=ON;  -- deleted text is overwritten with zeros, not just unlinked
         CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS files(
             path TEXT PRIMARY KEY, sha256 TEXT, size INTEGER, kind TEXT,
@@ -516,6 +522,117 @@ def cmd_ask(args):
 
 
 # ---------------------------------------------------------------------
+# remember and forget: memory I write, and memory I take back
+# ---------------------------------------------------------------------
+NOTES = S["vault"] / "notes"
+
+# Things that must never be saved as a note: card, account and ID numbers.
+SENSITIVE = [
+    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "a Social Security number"),
+    (re.compile(r"\b(?:\d[ -]?){13,19}\b"), "a card or account number"),
+    (re.compile(r"\b\d{9,}\b"), "a long account or ID number"),
+    (re.compile(r"(?i)\b(password|passcode|pin)\b\s*[:=]"), "a password or PIN"),
+]
+
+
+def reindex_quietly():
+    """Run ingest without its output. Only changed files are re-read."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        cmd_ingest(None)
+
+
+def scrub(con):
+    """Make deleted text really gone from the index file, not just hidden.
+
+    SQLite keeps deleted rows in free pages until the file is rebuilt, and the
+    keyword index keeps old segments until it's merged. Both are cleaned here.
+    """
+    con.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('optimize')")
+    con.commit()
+    con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    con.execute("VACUUM")
+    con.close()
+
+
+def cmd_remember(args):
+    text = " ".join(args.text).strip()
+    if not text:
+        sys.exit('Usage: uv run memory.py remember "what to remember"')
+    for pattern, what in SENSITIVE:
+        if pattern.search(text):
+            sys.exit(f"Not saved: this looks like {what}. Those never go in the vault's notes. "
+                     f"Keep them in your password manager.")
+    NOTES.mkdir(parents=True, exist_ok=True)
+    note_file = NOTES / f"{time.strftime('%Y-%m')}.md"
+    new_file = not note_file.exists()
+    with open(note_file, "a") as f:
+        if new_file:
+            f.write(f"# Things I told my AI to remember · {time.strftime('%B %Y')}\n\n")
+        f.write(f"- {time.strftime('%Y-%m-%d %H:%M')} · {text}\n")
+    reindex_quietly()
+    print(f"Remembered, in {note_file.relative_to(S['vault'])}:\n  {text}")
+    print("Ask about it any time. To take it back: uv run memory.py forget --note \"a few of its words\"")
+
+
+def confirm(prompt, yes):
+    if yes:
+        return True
+    return input(f"{prompt} Type yes to confirm: ").strip().lower() == "yes"
+
+
+def cmd_forget(args):
+    if not S["vault"].is_dir():
+        sys.exit(f"STOP: no vault at {S['vault']}.")
+    con = open_db()
+    if args.note:
+        words = args.note.lower()
+        hits = []
+        for f in sorted(NOTES.glob("*.md")) if NOTES.is_dir() else []:
+            for line in f.read_text().splitlines():
+                if line.startswith("- ") and words in line.lower():
+                    hits.append((f, line))
+        if not hits:
+            sys.exit(f'No remembered line contains "{args.note}". Nothing changed.')
+        print("These will be forgotten:")
+        for f, line in hits:
+            print(f"  {f.relative_to(S['vault'])}: {line[2:]}")
+        if not confirm(f"Forget {len(hits)} line(s)?", args.yes):
+            sys.exit("Nothing changed.")
+        for f in {f for f, _ in hits}:
+            keep = [l for l in f.read_text().splitlines()
+                    if not (l.startswith("- ") and words in l.lower())]
+            f.write_text("\n".join(keep) + "\n")
+        con.close()
+        reindex_quietly()
+        scrub(open_db())
+        print(f"Forgotten: {len(hits)} line(s), from the notes and from the index.")
+        return
+
+    if not args.target:
+        sys.exit('Usage: uv run memory.py forget FILE   or   forget --note "words"')
+    target = Path(args.target).expanduser()
+    if not target.is_absolute():
+        target = (S["vault"] / target) if (S["vault"] / target).exists() else target.resolve()
+    target = target.resolve()
+    vault = S["vault"].resolve()
+    if vault not in target.parents:
+        sys.exit(f"STOP: {target} is not inside the vault ({vault}). I only forget vault files.")
+    if not target.is_file():
+        sys.exit(f"No such file in the vault: {target}")
+    rel = str(target.relative_to(vault))
+    n = con.execute("SELECT count(*) FROM chunks WHERE path=?", (rel,)).fetchone()[0]
+    if not confirm(f"Delete {rel} ({n} passages) from the vault and from memory? "
+                   f"This can't be undone.", args.yes):
+        sys.exit("Nothing changed.")
+    target.unlink()
+    drop_file(con, rel)
+    con.commit()
+    scrub(con)
+    print(f"Forgotten: {rel}. The file is deleted and its {n} passages are gone from the index.")
+    print("Copies elsewhere (Time Machine, other backups) are not touched.")
+
+
+# ---------------------------------------------------------------------
 # recall: score my own questions about my own files
 # ---------------------------------------------------------------------
 EVAL_DIR = S["vault"] / ".eval"          # inside the vault, never indexed (starts with ".")
@@ -670,6 +787,14 @@ def main():
     a_.add_argument("-k", type=int, default=8, help="how many passages to read (default 8)")
     a_.add_argument("--think", action="store_true", help="let the model think first (slower)")
     a_.set_defaults(f=cmd_ask)
+    rm_ = sub.add_parser("remember", help="save something I tell it")
+    rm_.add_argument("text", nargs="+")
+    rm_.set_defaults(f=cmd_remember)
+    fg = sub.add_parser("forget", help="delete a vault file, or remembered lines, from memory")
+    fg.add_argument("target", nargs="?", help="a file in the vault, e.g. inbox/old-bill.pdf")
+    fg.add_argument("--note", help="forget remembered lines containing these words")
+    fg.add_argument("--yes", action="store_true", help="don't ask for confirmation")
+    fg.set_defaults(f=cmd_forget)
     rc = sub.add_parser("recall", help="score my own test questions")
     rc.add_argument("--init", action="store_true", help="create the questions file")
     rc.add_argument("--no-ask", action="store_true", help="only check search (fast, no model answers)")

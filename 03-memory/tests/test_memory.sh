@@ -63,12 +63,34 @@ check "answer cites a passage"   grep -q "\[1\]" <<<"$OUT"
 check "sources listed with page" grep -q "\[1\] inbox/year-end-summary.pdf p.1" <<<"$OUT"
 check "timing reported"          grep -q "first word" <<<"$OUT"
 
+echo "==> remember and forget"
+OUT="$(mem remember "My golf handicap is 14 as of October 2026")"
+check "remember saves a note"          grep -q "Remembered" <<<"$OUT"
+check "note is a plain file"           bash -c "grep -q 'handicap is 14' '$VAULT_DIR'/notes/*.md"
+check "note is searchable at once"     bash -c "cd '$HERE' && uv run --quiet memory.py search 'golf handicap' --mode words | head -1 | grep -q 'notes/'"
+check "refuses a card number"          bash -c "cd '$HERE' && ! uv run --quiet memory.py remember 'my card is 4111 1111 1111 1111'"
+check "refuses an SSN"                 bash -c "cd '$HERE' && ! uv run --quiet memory.py remember 'ssn 123-45-6789'"
+check "refused text not saved"         bash -c "! grep -q 4111 '$VAULT_DIR'/notes/*.md"
+mem remember "Pete prefers early tee times" >/dev/null
+OUT="$(mem forget --note "handicap is 14" --yes)"
+check "forget a note"                  grep -q "Forgotten: 1 line" <<<"$OUT"
+check "other notes kept"               bash -c "grep -q 'early tee times' '$VAULT_DIR'/notes/*.md"
+check "forgotten note not searchable"  bash -c "cd '$HERE' && ! uv run --quiet memory.py search 'handicap' --mode words | grep -q 'notes/'"
+check "forgotten note gone from index file" bash -c "! grep -a -q 'handicap is 14' '$VAULT_DIR/.index/memory.db'"
+OUT="$(mem forget inbox/auto-renewal.docx --yes)"
+check "forget a file"                  grep -q "Forgotten: inbox/auto-renewal.docx" <<<"$OUT"
+check "file deleted from the vault"    test ! -e "$VAULT_DIR/inbox/auto-renewal.docx"
+check "forgotten file not searchable"  bash -c "cd '$HERE' && ! uv run --quiet memory.py search deductible --mode words | grep -q auto-renewal"
+check "forgotten file gone from index file" bash -c "! grep -a -q 'deductible' '$VAULT_DIR/.index/memory.db'"
+check "refuses files outside the vault" bash -c "cd '$HERE' && ! uv run --quiet memory.py forget /etc/hosts --yes"
+check "no confirmation, no change"     bash -c "cd '$HERE' && echo no | uv run --quiet memory.py forget inbox/trip-ideas.md; test -e '$VAULT_DIR/inbox/trip-ideas.md'"
+
 echo "==> recall test"
 mem recall >/dev/null
 check "recall creates questions file" test -f "$VAULT_DIR/.eval/questions.txt"
 cat >> "$VAULT_DIR/.eval/questions.txt" <<'Q'
 When is the invoice due? | electric-bill |
-What deductible does the auto policy have? | auto-renewal | 500
+Which ideas did I note for Japan? | trip-ideas | Kyoto
 What is my golf handicap? | NONE |
 Q
 OUT="$(mem recall --no-ask)"
