@@ -2,7 +2,7 @@
 
 A memory that belongs to me. My files live in `~/vault` on the Mac Studio. The AI builds a search index from them, finds the passages that matter, and answers from them with citations.
 
-**Status:** all 4 parts built. Parts 1–3 run on the Studio with the real models (recall test: right file in the top 3 for 6/6 questions, answers right 4/6, honest 1/1). Part 4, `remember` and `forget`, is tested with a stand-in model; first Studio run next.
+**Status:** ✅ Step 3 closed (Oct 26 2026). All 4 parts run on the Studio with the real models: vault, ingest and search, answers with sources, remember and forget. Recall test: right file in the top 3 for 6/6 questions, answers right 4/6, honest 1/1. Left open on purpose: backup, scans, access from other devices, 16 passages.
 
 ---
 
