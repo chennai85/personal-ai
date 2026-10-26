@@ -62,6 +62,7 @@ Put files anywhere in `~/vault` (for example `~/vault/inbox/`), then run `ingest
 | `recall` | Score my own test questions: right file in the top 3? Right answer? "Not in my memory" when it should? `--no-ask` checks search only (fast) |
 | `status` | What's indexed, what was skipped and why, is the model reachable |
 | `rebuild` | Delete the index and build it again (needed after changing the embedding model) |
+| `values` | Step 4: the constitution. `values approve`, `values unlock`, `values test`. See [04-values](../04-values/) |
 
 Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_template.md`).
 
@@ -93,7 +94,7 @@ Files and folders starting with `.` or `_` are skipped (`.index/`, `people/_temp
 
 ## Tested (stand-in model)
 
-`bash tests/test_memory.sh` runs 52 checks in a throwaway vault with a stand-in model. All pass.
+`bash tests/test_memory.sh` runs 79 checks in a throwaway vault with a stand-in model (52 for memory, 27 for [values](../04-values/)). All pass.
 
 | Check | Result |
 |---|---|
@@ -175,8 +176,8 @@ Both wrong answers had the right file but needed facts spread over several pages
 |---|---|
 | `WHY-THIS-DESIGN.md` | Decision record |
 | `vault_setup.sh` | Creates `~/vault` from the template, checks privacy and the model |
-| `memory.py` | ingest, search, ask, remember, forget, recall, status, rebuild |
-| `vault-template/` | The blank vault (safe to be public) |
+| `memory.py` | ingest, search, ask, remember, forget, recall, status, rebuild, values |
+| `vault-template/` | The blank vault (safe to be public), including an example constitution |
 | `tests/` | `test_memory.sh`, a stand-in model, and made-up sample files |
 
 Changed elsewhere in v1.3: `01-environment/standard.sh` (vault, embedding model, 3 loaded models), `01-environment/verify.sh` (vault checks), `02-local-model/server_setup.sh` (pulls the embedding model).
