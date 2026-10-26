@@ -135,6 +135,13 @@ if [ "$PROFILE" = "studio" ]; then
     while [ "$d" != "/" ]; do [ -d "$d/.git" ] && INREPO=1; d="$(dirname "$d")"; done
     if [ "$INREPO" = "0" ]; then rec PASS "vault outside git" "not inside any repo"; else rec FAIL "vault outside git" "the vault is inside a git repo"; fi
     if fdesetup status 2>/dev/null | grep -q "On"; then rec PASS "FileVault" "on (disk encrypted)"; else rec FAIL "FileVault" "off: System Settings > Privacy & Security > FileVault"; fi
+    CONST="$VAULT_DIR/values/constitution.md"; CHASH="$VAULT_DIR/.values/approved.sha256"
+    if [ -f "$CONST" ] && [ -f "$CHASH" ]; then
+      NOW_HASH="$( (shasum -a 256 "$CONST" 2>/dev/null || sha256sum "$CONST") | cut -d' ' -f1)"
+      if [ "$NOW_HASH" = "$(tr -d '[:space:]' < "$CHASH")" ]; then rec PASS "constitution" "approved and unchanged"
+      else rec FAIL "constitution" "BIG RED FLAG: changed since approval (uv run memory.py values)"; fi
+    elif [ -f "$CONST" ]; then rec WARN "constitution" "not approved yet (uv run memory.py values approve)"
+    else rec WARN "constitution" "none yet (Step 4)"; fi
     if [ -f "$VAULT_INDEX" ]; then rec PASS "memory index" "$VAULT_INDEX ($(du -h "$VAULT_INDEX" | cut -f1))"
     else rec WARN "memory index" "not built yet (uv run memory.py ingest)"; fi
   else
