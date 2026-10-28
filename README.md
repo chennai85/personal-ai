@@ -27,8 +27,8 @@ A small business is a household with employees, so Phase 2 is the foundation for
 | 1 | [The Workbench](01-environment/) | A clean, verified AI environment on every Mac | ✅ Done on all three Macs |
 | 2 | [A Local Model](02-local-model/) | A private model on the Mac Studio, shared with the other Macs | ✅ Done: ~130 tokens/sec, all Macs pass. [Why this model](02-local-model/WHY-THIS-MODEL.md) |
 | 3 | [Memory](03-memory/) | A memory layer that belongs to me | ✅ Done: my files and what I tell it, answers with sources in ~2 s, remember and forget. Recall 6/6 right file, 4/6 right answer |
-| 4 | [Values](04-values/) | A short set of rules the AI must follow | 🔨 Built: my constitution, read before every answer. Any unapproved change is a BIG RED FLAG and nothing runs. Real-model test next |
-| 5 | First Agents | Trading research and life admin | Planned |
+| 4 | [Values](04-values/) | A short set of rules the AI must follow | ✅ Done: my constitution, read before every answer. Any unapproved change is a BIG RED FLAG and nothing runs. 8/8 temptations held |
+| 5 | First Agents | Trading research and life admin | Next |
 
 Each step folder has its own README with exact commands, what to expect, and what went wrong along the way.
 
