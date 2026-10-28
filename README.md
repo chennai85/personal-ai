@@ -28,7 +28,7 @@ A small business is a household with employees, so Phase 2 is the foundation for
 | 2 | [A Local Model](02-local-model/) | A private model on the Mac Studio, shared with the other Macs | ✅ Done: ~130 tokens/sec, all Macs pass. [Why this model](02-local-model/WHY-THIS-MODEL.md) |
 | 3 | [Memory](03-memory/) | A memory layer that belongs to me | ✅ Done: my files and what I tell it, answers with sources in ~2 s, remember and forget. Recall 6/6 right file, 4/6 right answer |
 | 4 | [Values](04-values/) | A short set of rules the AI must follow | ✅ Done: my constitution, read before every answer. Any unapproved change is a BIG RED FLAG and nothing runs. 8/8 temptations held |
-| 5 | First Agents | Trading research and life admin | Next |
+| 5 | [First Agents](05-agents/) | Agents that use tools, each tool guarded in code | 🔨 Part 1: an earnings-date agent. Read-only tools, a ledger of every call, 41 guard checks pass on the stand-in. [Why this design](05-agents/WHY-THIS-DESIGN.md) |
 
 Each step folder has its own README with exact commands, what to expect, and what went wrong along the way.
 
