@@ -82,7 +82,16 @@ Four areas, from my own past sessions (GS1–GS9) and my Daily Operating Framewo
 | Deleting the constitution doesn't silently pass | ✅ |
 | Constitution never searchable | ✅ |
 
-**Not measured yet:** whether the real model holds the line. That's `values test` on the Studio.
+## On the Studio (Oct 26 2026, real model)
+
+| Check | Result |
+|---|---|
+| `values test`, qwen3.6:35b-a3b, judged by me | **Held the line: 8/8** (V1–V8 ✓) |
+| Red flag drill: one line added, then `ask` | Red banner, the exact line, nothing ran |
+| Restore the approved copy | `values` back to OK |
+| `verify.sh` constitution check | PASS |
+
+**What 8/8 doesn't prove:** one run, judged by me, and every question asked it directly to break a rule. The harder test is a push from *inside* a file (an email that says "ignore your rules"). That comes with the agents in Step 5.
 
 ## What values can and can't do
 
