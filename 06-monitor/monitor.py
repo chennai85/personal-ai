@@ -4,7 +4,8 @@ monitor.py: watch my agents, on the Mac Studio. Read-only.
 
     python3 monitor.py status           what's happening: alerts, model server, agents, tests
     python3 monitor.py status --days 30 look further back (default 7)
-    python3 monitor.py status --json    the same, as JSON (the web page reads this in Part 2)
+    python3 monitor.py status --json    the same, as JSON (what the web page reads)
+    python3 monitor.py serve            the web page: http://zenstudio:8765 (this Mac + Tailscale only)
 
 The agents never know the monitor exists. They write to the ledger; the monitor reads it.
 So an agent run by hand today and one run on a schedule later show up the same way.
@@ -105,8 +106,9 @@ APPROVED_HASH = S["vault"] / ".values" / "approved.sha256"
 AUDITS = S["root"] / "scripts" / "audits"
 
 
-def read_bytes(path):
+def read_bytes(path, offset=0):
     with open(path, "rb") as f:          # the only way the monitor opens a file
+        f.seek(offset)
         return f.read()
 
 
@@ -137,13 +139,18 @@ def parse_time(s):
 
 
 def read_ledger(path=None):
-    path = path or LEDGER
-    rows, bad = [], 0
     try:
-        data = read_bytes(path)
+        data = read_bytes(path or LEDGER)
     except FileNotFoundError:
-        return rows, bad, False
-    complete = data[: data.rfind(b"\n") + 1]           # drop a half-written last line
+        return [], 0, False
+    rows, bad, _ = parse_lines(data)
+    return rows, bad, True
+
+
+def parse_lines(data):
+    """Whole lines only (an agent may be writing the last one). Returns rows, bad, bytes used."""
+    complete = data[: data.rfind(b"\n") + 1]
+    rows, bad = [], 0
     for line in complete.splitlines():
         if not line.strip():
             continue
@@ -161,7 +168,7 @@ def read_ledger(path=None):
                 r[k] = "(unknown)"
         r["_t"] = t
         rows.append(r)
-    return rows, bad, True
+    return rows, bad, len(complete)
 
 
 def num(v):
@@ -268,7 +275,7 @@ def build_runs(rows, now):
 
 def agent_stats(rows, runs, now, days):
     since, today = now - dt.timedelta(days=days), now.replace(hour=0, minute=0, second=0, microsecond=0)
-    names = sorted({r["agent"] for r in rows})
+    names = sorted({r["agent"] for r in rows}, key=lambda n: (n == "(unknown)", n))   # odd names last
     out = []
     for name in names:
         rs = [r for r in runs if r["agent"] == name and r["start"] >= since]
@@ -388,15 +395,24 @@ def tailscale_bin():
     return shutil.which("tailscale") or (app if Path(app).exists() else None)
 
 
-def check_machines(now):
+def tailscale_status():
+    """Tailscale's own JSON, or (None, why)."""
     exe = tailscale_bin()
     if not exe:
-        return [], [alert("amber", "can't see Tailscale", "not installed here, or not on the PATH")]
+        return None, "missing"
     try:
         out = subprocess.run([exe, "status", "--json"], capture_output=True, text=True, timeout=5)
-        st = json.loads(out.stdout)
+        return json.loads(out.stdout), None
     except Exception as e:
-        return [], [alert("amber", "can't read Tailscale status", type(e).__name__)]
+        return None, type(e).__name__
+
+
+def check_machines(now):
+    st, why = tailscale_status()
+    if why == "missing":
+        return [], [alert("amber", "can't see Tailscale", "not installed here, or not on the PATH")]
+    if st is None:
+        return [], [alert("amber", "can't read Tailscale status", why)]
     machines, alerts = [], []
     me = st.get("Self") or {}
     if st.get("BackendState") != "Running":
@@ -595,7 +611,14 @@ def main():
     st = sub.add_parser("status", help="alerts, model server, agents, tests")
     st.add_argument("--days", type=int, default=7)
     st.add_argument("--json", action="store_true")
+    sv = sub.add_parser("serve", help="the web page, on this Mac and over Tailscale only")
+    sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--bind", action="append", help="address to listen on (default: 127.0.0.1 + this Mac's Tailscale address)")
+    sv.add_argument("--dry-run", action="store_true", help="say where it would listen, then stop")
     args = p.parse_args()
+    if args.cmd == "serve":
+        import server
+        return server.main(args)
     s = snapshot(days=args.days)
     print(json.dumps(s, indent=2) if args.json else render(s))
     return 1 if any(a["level"] == "red" for a in s["alerts"]) else 0
