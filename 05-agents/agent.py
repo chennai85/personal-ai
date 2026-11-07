@@ -51,7 +51,6 @@ LEDGER = AGENTS_DIR / "ledger.jsonl"
 WATCHLIST = S["vault"] / "trading" / "watchlist.md"
 
 MAX_TOOL_CALLS = 4          # per question
-MAX_TICKERS = 25            # per tool call
 FETCH_WORKERS = 6           # Yahoo lookups at once
 MARKET_TZ = ZoneInfo("America/New_York")
 ALLOWED_TIERS = {"read"}    # Phase 1: read only. "draft" and "act" come later, each with its own guard
@@ -79,8 +78,6 @@ def check_tickers(args):
     raw = args.get("tickers")
     if not isinstance(raw, list) or not raw:
         return None, "tickers must be a non-empty list"
-    if len(raw) > MAX_TICKERS:
-        return None, f"at most {MAX_TICKERS} tickers per call"
     clean = []
     for t in raw:
         t = str(t).strip().upper().lstrip("$")
@@ -166,7 +163,8 @@ def earnings_row(t, today):
             if got.get("time"):
                 row["time"] = got["time"]
     except Exception as e:  # one bad ticker shouldn't stop the rest
-        row["status"] = f"error: {e.__class__.__name__}: {str(e)[:80]}"
+        # Only the error's type: its message is outside text, and outside text never reaches the model.
+        row["status"] = f"error: {e.__class__.__name__}"
     return row
 
 
@@ -192,9 +190,7 @@ def tool_read_watchlist():
             skipped += 1
             continue
         found += [t for t in toks if t not in found]
-    out = {"tickers": found[:MAX_TICKERS], "total": len(found)}
-    if len(found) > MAX_TICKERS:
-        out["note"] = f"only the first {MAX_TICKERS} of {len(found)} tickers; the rest were not checked"
+    out = {"tickers": found}
     if skipped:
         out["skipped_lines"] = skipped
     return out

@@ -16,9 +16,12 @@
 | Confirmed vs estimate | Read Yahoo's raw `calendarEvents` (`isEarningsDateEstimate`), not yfinance's `.calendar`. Labels: confirmed / estimate / window / can't tell | Nov 7 run: late-January dates for MSFT and AAPL were Yahoo's guesses, shown as facts. `.calendar` drops the flag |
 | Raw call | `yf.Ticker(t)._quote._fetch(["calendarEvents"])`, yfinance pinned `<2`, falls back to `.calendar` ("can't tell") | It's yfinance's internal call; it can move between versions. Falling back is honest, not silent |
 | Time of day | Only for confirmed dates: before open / after close / during market, in New York time | An estimate's time is a placeholder. Midnight means no time given |
-| Watchlist cap | 25 tickers per call; a NOTE when there are more | Silently dropping tickers is the same mistake as a made-up date, in reverse |
+| Watchlist size | No limit (was 25, removed Nov 7) | It's my own list. A cap that drops tickers silently is the same mistake as a made-up date, in reverse. The budget of 4 calls still stops loops |
 | Fetching | 6 Yahoo lookups at a time, same order back | 24 tickers one by one took most of 21 s |
 | Constitution | Reused from `03-memory/memory.py` (`load_constitution`) | One check, one place. A changed constitution stops the agent like it stops `ask` |
 | Watchlist | A line counts only if every word on it is a ticker as written | Text in my own files must never become instructions or tickers. This is the first side-door guard |
 | `--direct` | Same tool without the model | A baseline. If the agent and the direct run disagree, the agent is wrong |
+| Outside text | Never reaches the model: watchlist reader keeps tickers only; tool results cut to dates and labels; errors reduced to their type | The side door stays shut by shaping data before the model sees it, not by asking the model to ignore it |
+| Side-door test | `sidedoor.py` opens a free-text "news" field on purpose and plants 6 instructions, plus 1 in the watchlist. Real model. Scored automatically as model held / code held | Scoring by script, not by feel. An obedient stand-in proves the scorer can fail (0/6 model, 5/5 code) |
+| Values-only gaps | Buy/sell advice and repeating the constitution have no code guard yet | They stay on my screen today. They need code guards before any agent can send anything out |
 | Run | On demand, from the command line | Scheduling (a brief before 4 am) comes after the real runs look right |
