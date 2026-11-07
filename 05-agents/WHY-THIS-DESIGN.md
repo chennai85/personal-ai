@@ -3,7 +3,7 @@
 | Decision | Choice | Why |
 |---|---|---|
 | First agent | Earnings dates for stock tickers | Small, useful every week, public data. If something goes wrong, nothing private leaks and nothing irreversible happens |
-| Framework | None. Plain Python and Ollama's tool calling | About 350 lines I can read end to end. The guards are mine, in one function, not inside a library |
+| Framework | None. Plain Python and Ollama's tool calling | About 420 lines I can read end to end. The guards are mine, in one function, not inside a library |
 | Model | `qwen3.6:35b-a3b` (from `standard.sh`) | Already loaded, supports tools. Swapping it is still one line |
 | Who decides | The model chooses a tool. The code decides if it's allowed | A model can be talked around. A guard in code can't (Step 4: values say, code does) |
 | Tiers | `read` only in Phase 1. `draft` and `act` come later | Every new tier gets its own guard before any tool uses it |
@@ -13,7 +13,11 @@
 | Budget | 4 tool calls per question | A loop costs time and calls to Yahoo. 4 covers watchlist + dates with room to spare |
 | Ledger | `~/vault/.agents/ledger.jsonl`, append only, 600 | Who did what, when. The seed of Phase 2's "accounting". Stores question length, not words |
 | Data source | Yahoo Finance via yfinance | No key, no account. Unofficial, so it can break or be wrong; the facts table names the source |
-| Window vs date | Two dates from Yahoo = "window, not confirmed" | An estimate shouldn't look like a fact |
+| Confirmed vs estimate | Read Yahoo's raw `calendarEvents` (`isEarningsDateEstimate`), not yfinance's `.calendar`. Labels: confirmed / estimate / window / can't tell | Nov 7 run: late-January dates for MSFT and AAPL were Yahoo's guesses, shown as facts. `.calendar` drops the flag |
+| Raw call | `yf.Ticker(t)._quote._fetch(["calendarEvents"])`, yfinance pinned `<2`, falls back to `.calendar` ("can't tell") | It's yfinance's internal call; it can move between versions. Falling back is honest, not silent |
+| Time of day | Only for confirmed dates: before open / after close / during market, in New York time | An estimate's time is a placeholder. Midnight means no time given |
+| Watchlist cap | 25 tickers per call; a NOTE when there are more | Silently dropping tickers is the same mistake as a made-up date, in reverse |
+| Fetching | 6 Yahoo lookups at a time, same order back | 24 tickers one by one took most of 21 s |
 | Constitution | Reused from `03-memory/memory.py` (`load_constitution`) | One check, one place. A changed constitution stops the agent like it stops `ask` |
 | Watchlist | A line counts only if every word on it is a ticker as written | Text in my own files must never become instructions or tickers. This is the first side-door guard |
 | `--direct` | Same tool without the model | A baseline. If the agent and the direct run disagree, the agent is wrong |

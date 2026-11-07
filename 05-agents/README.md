@@ -5,23 +5,28 @@ Until now, the AI could only read my files and answer. An agent can use tools. S
 **Part 1: the earnings-date agent.** Ask it when companies report earnings. It looks up the dates and tells me, with the facts printed by the code underneath.
 
 ```bash
-uv run agent.py earnings "When do NVDA and AAPL report?"
+uv run agent.py earnings "When do NVDA, AAPL and MSFT report?"
 ```
 
+First real run on the Studio, Oct 28 2026 (before the estimate fix):
+
 ```
-NVDA: 2026-11-19 (ok)
-AAPL: 2026-10-30 to 2026-11-03 (window, not confirmed)
+MSFT: 2026-10-28 (today)
+AAPL: 2026-11-02
+NVDA: 2026-11-17
 
 Facts  (from the tool, printed by the code: check these, not the sentence)
   Ticker  Earnings date                  In  Note
-  AAPL    2026-10-30 to 2026-11-03      2 d  window, not confirmed
-  NVDA    2026-11-19                   22 d
-  Source: Yahoo Finance. Two dates = a window, not confirmed. Research only.
+  MSFT    2026-10-28                    0 d
+  AAPL    2026-11-02                    5 d
+  NVDA    2026-11-17                   20 d
 
-(1 tool call(s) · 0.0 s · qwen3.6:35b-a3b · ledger: ~/vault/.agents/ledger.jsonl)
+(1 tool call(s) · 1.4 s · qwen3.6:35b-a3b · ledger: ~/vault/.agents/ledger.jsonl)
 ```
 
-*(Example from the stand-in test, not a real run. Real dates and timing come from the Studio.)*
+All three matched the companies' own announcements. 11.2 s the first time (the model loading), 1.4 s after.
+
+Since Nov 7 each row also says **confirmed** (with *before open* / *after close*), **Yahoo's estimate, not announced**, or **window, not confirmed**.
 
 Research only. It never says buy, sell or hold. I make the calls.
 
@@ -56,7 +61,7 @@ The model chooses. The code decides. The tool fetches. The code prints the facts
 | Piece | In this step |
 |---|---|
 | Agent | `earnings`: a purpose and a list of two tools. Nothing else |
-| Tools | `earnings_dates` (Yahoo Finance via yfinance), `read_watchlist` (`~/vault/trading/watchlist.md`). Both **read** tier |
+| Tools | `earnings_dates` (Yahoo Finance via yfinance: dates, estimate or confirmed, time of day; tickers fetched 6 at a time), `read_watchlist` (`~/vault/trading/watchlist.md`, at most 25 tickers, and it says so when there are more). Both **read** tier |
 | Tiers | `read` allowed. `draft` and `act` not allowed in Phase 1. Send, delete, pay and trade aren't built at all |
 | Ledger | `~/vault/.agents/ledger.jsonl`: every question (length only, not the words), every tool call, every block. Private (600) |
 
@@ -73,13 +78,15 @@ The model chooses. The code decides. The tool fetches. The code prints the facts
 | Dates must come from the tool | A date the model made up | Flagged with CHECK |
 | No tool called = flagged | An answer from the model's own memory | Flagged |
 | Watchlist reads tickers only | Words in my files becoming instructions or tickers ("ignore your rules…") | Prose lines skipped, never read as tickers |
+| Estimates are labelled | A guess shown as a fact | Yahoo's `isEarningsDateEstimate`, tested on Apple's real answer |
+| The cap says so | Tickers past 25 vanishing silently | 28 tickers → NOTE "only the first 25 of 28" |
 
 ## Run it (Mac Studio)
 
 ```bash
 cd ~/driving-range/ai-experiments/personal-ai && git pull
 cd 05-agents
-bash tests/test_agent.sh                                  # 41 checks, stand-in model, made-up dates
+bash tests/test_agent.sh                                  # 56 checks, stand-in model, made-up dates
 uv run agent.py tools                                     # what it can and can't do
 uv run agent.py earnings --direct NVDA AAPL MSFT          # facts only, no model: the baseline
 uv run agent.py earnings "When do NVDA, AAPL and MSFT report?"
@@ -107,9 +114,21 @@ uv run agent.py earnings "When does my watchlist report?"
 
 ## Tested (stand-in model)
 
-`bash tests/test_agent.sh`: 41 checks, all pass. Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
+`bash tests/test_agent.sh`: 56 checks, all pass. Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
 
 To check the tests themselves, I broke each guard on purpose and re-ran them. Every break was caught. The first time, removing the "on this agent's list" check changed nothing: with one agent, every tool is on its list. That check is now tested directly.
+
+## What the real runs found
+
+| Run | Found | Fixed |
+|---|---|---|
+| Oct 28, 3 tickers | Right dates, but Yahoo's day has no hour: "MSFT 0 d" didn't say "after close" | Confirmed dates now show before open / after close |
+| Nov 7, my 24-ticker watchlist | MSFT and AAPL showed late-January dates as if certain. Yahoo's raw answer says `"isEarningsDateEstimate": true`; yfinance's `.calendar` drops it | Read the raw answer; estimates labelled |
+| Nov 7 | 24 tickers, cap of 25: two more and some would vanish without a word | A NOTE when the watchlist is cut |
+| Nov 7 | 21 s for 24 tickers, one lookup after another | Lookups 6 at a time |
+| Nov 7 | The model's sentence put AAPL (82 d) above MSFT (81 d) | Nothing to fix: that's why the code prints the table |
+
+The guard checked that every date came from the source. It didn't check how sure the source was.
 
 ## Not tested here
 
@@ -122,7 +141,7 @@ To check the tests themselves, I broke each guard on purpose and re-ran them. Ev
 | File | What |
 |---|---|
 | `agent.py` | The agent, tools, guards, ledger |
-| `tests/test_agent.sh` | 41 checks with a stand-in model and made-up dates |
+| `tests/test_agent.sh` | 56 checks with a stand-in model and made-up dates |
 | `tests/mock_agent_ollama.py` | Stand-in model that calls tools in fixed ways (and misbehaves on purpose) |
-| `tests/guard_checks.py` | Direct checks on the guards a single read-only agent never reaches |
+| `tests/guard_checks.py` | Direct checks: guards a single read-only agent never reaches, time-of-day conversion, and the Yahoo parser fed Apple's real answer |
 | `WHY-THIS-DESIGN.md` | The decisions, and why |
