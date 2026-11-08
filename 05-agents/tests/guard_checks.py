@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import agent  # noqa: E402
+agent.LEDGER = agent.AGENTS_DIR / "guard-checks.jsonl"   # its own ledger: these calls have no question
 
 ran = []
 agent.TOOLS["other_read"] = {"tier": "read", "check": agent.check_nothing,
@@ -53,3 +54,26 @@ sys.modules["yfinance"] = types.SimpleNamespace(Ticker=FakeTicker)
 os.environ.pop("EARNINGS_FAKE", None)
 for sym in ("AAPL", "CONF", "OLDYF"):
     print("RAW", sym, json.dumps(agent.fetch_earnings(sym)))
+
+# Ledger v2: a tool that breaks is recorded and the run goes on; a free-text reason never lands
+agent.TOOLS["boom_read"] = {"tier": "read", "check": agent.check_nothing, "show": (),
+                            "run": lambda: (_ for _ in ()).throw(ValueError("SECRET-CRASH")), "what": "", "schema": {}}
+agent.AGENTS["earnings"]["tools"].append("boom_read")
+res, why = agent.guarded_call("earnings", "boom_read", {}, "abc123")
+print("CRASH result", json.dumps(res))
+last = json.loads(agent.LEDGER.read_text().splitlines()[-1])
+print("CRASH row tool", last["tool"], "ok", last["ok"], "error", last["error"])
+agent.ledger("earnings", "blocked", "abc123", tool=None, reason="not a ticker: 'SECRET-REASON'")
+print("REASON", json.loads(agent.LEDGER.read_text().splitlines()[-1])["reason"])
+
+# Only declared arguments reach the ledger; a model-made tool name that isn't a plain name doesn't either
+agent.TOOLS["two_args"] = {"tier": "read", "show": ("tickers",), "what": "", "schema": {},
+                           "check": lambda a: ({"tickers": ["NVDA"], "note": "SECRET-NOTE"}, None),
+                           "run": lambda tickers, note: {}}
+agent.AGENTS["earnings"]["tools"].append("two_args")
+agent.guarded_call("earnings", "two_args", {}, "abc123")
+last = json.loads(agent.LEDGER.read_text().splitlines()[-1])
+print("SHOWN", sorted(last["args"]), "hidden", last["args_hidden"])
+agent.guarded_call("earnings", "Send Email Now!", {}, "abc123")
+last = json.loads(agent.LEDGER.read_text().splitlines()[-1])
+print("ODD NAME", last["tool"], last["reason"])

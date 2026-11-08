@@ -53,7 +53,12 @@ SAFE_ARGS = {
     "earnings": {"earnings_dates": {"tickers"}, "direct": {"tickers"}},
 }
 
-# Block reasons can carry model-written text ("not a ticker: '...'"). Show the category only.
+# Ledger v2 writes the kind of block itself, from this list. Anything else is mapped below.
+KINDS = {"no such tool", "not on this agent's list", "tool tier not allowed", "arguments refused",
+         "tool budget reached", "refused"}
+ERRNAME = re.compile(r"^[A-Za-z][A-Za-z0-9_.]{0,39}$")      # URLError, ValueError: a type, never a message
+
+# v1 block reasons can carry model-written text ("not a ticker: '...'"). Show the category only.
 REASONS = [
     (re.compile(r"^no such tool"), "no such tool"),
     (re.compile(r"is not on the .* list"), "not on this agent's list"),
@@ -175,9 +180,14 @@ def num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def safe_args(agent, key, args):
-    """Only fields this agent declared safe, and only short tokens. Anything else: a count."""
-    allowed = SAFE_ARGS.get(agent, {}).get(key, set())
+def safe_args(agent, key, args, allowed=None):
+    """Only fields declared safe, and only short tokens. Anything else: a count.
+
+    v1 rows: the monitor's own SAFE_ARGS list. v2 rows: the agent already kept only the fields
+    its tool declares ("show" in agent.py); the monitor still lets through short tokens only.
+    """
+    if allowed is None:
+        allowed = SAFE_ARGS.get(agent, {}).get(key, set())
     shown, hidden = {}, 0
     if not isinstance(args, dict):
         return shown, (1 if args else 0)
@@ -196,6 +206,8 @@ def safe_args(agent, key, args):
 def reason_category(reason):
     if not isinstance(reason, str):
         return "refused"
+    if reason in KINDS:
+        return reason
     for pat, label in REASONS:
         if pat.search(reason):
             return label
@@ -218,13 +230,24 @@ def safe_event(r):
         if event == "tool":
             e["ok"] = r.get("ok") is True
             e["seconds"] = num(r.get("seconds"))
-            e["args"], e["hidden"] = safe_args(agent, tool, r.get("args"))
+            if isinstance(r.get("error"), str) and ERRNAME.match(r["error"]):
+                e["error"] = r["error"]
+            args = r.get("args")
+            if r.get("v") == 2 and isinstance(args, dict):
+                e["args"], e["hidden"] = safe_args(agent, tool, args, allowed=set(args))
+                e["hidden"] += num(r.get("args_hidden")) or 0
+            else:
+                e["args"], e["hidden"] = safe_args(agent, tool, args)
         else:
             e["reason"] = reason_category(r.get("reason"))
             e["hidden"] = 1 if r.get("args") else 0        # blocked args: never shown
     elif event == "answer":
         for k in ("tool_calls", "blocked", "unverified", "seconds"):
             e[k] = num(r.get(k))
+    elif event == "error":
+        e["where"] = r["where"] if isinstance(r.get("where"), str) and NAME.match(r["where"]) else "(hidden)"
+        e["error"] = r["error"] if isinstance(r.get("error"), str) and ERRNAME.match(r["error"]) else "(hidden)"
+        e["seconds"] = num(r.get("seconds"))
     elif event == "direct":
         e["args"], e["hidden"] = safe_args(agent, "direct", {"tickers": r.get("tickers")})
     return e
@@ -238,7 +261,8 @@ def build_runs(rows, now):
 
     def start(r, key):
         run = {"agent": r["agent"], "start": r["_t"], "end": None, "tool_calls": 0, "blocked": 0,
-               "unverified": 0, "seconds": None, "failed_tools": 0, "finished": False, "superseded": False}
+               "unverified": 0, "seconds": None, "failed_tools": 0, "finished": False, "superseded": False,
+               "error": False}
         runs.append(run)
         open_by_key[key] = run
         return run
@@ -261,6 +285,9 @@ def build_runs(rows, now):
             run["failed_tools"] += 0 if r.get("ok") is True else 1
         elif ev == "blocked":
             run["blocked"] += 1
+        elif ev == "error":                     # v2: the run ended, and said why
+            run["finished"], run["error"], run["end"] = True, True, r["_t"]
+            open_by_key.pop(key, None)
         elif ev == "answer":
             run["finished"], run["end"] = True, r["_t"]
             run["seconds"] = num(r.get("seconds"))
@@ -291,6 +318,7 @@ def agent_stats(rows, runs, now, days):
             "blocked": sum(r["blocked"] for r in rs),
             "unverified": sum(r["unverified"] for r in rs),
             "unfinished": sum(r["unfinished"] for r in rs),
+            "errors": sum(r["error"] for r in rs),
             "running": sum(r["running"] for r in rs),
             "typical_s": round(statistics.median(secs), 1) if secs else None,
             "slowest_s": round(max(secs), 1) if secs else None,
@@ -311,6 +339,9 @@ def ledger_alerts(stats, bad, days):
                            f"last {days} days. A date the tool didn't give"))
         if s["failed_tools"]:
             a.append(alert("red", f"{n}: {s['failed_tools']} tool call(s) not ok", f"last {days} days"))
+        if s["errors"]:
+            a.append(alert("red", f"{n}: {s['errors']} run(s) ended in an error",
+                           f"last {days} days. Model server down, or a bad reply. See Live"))
         if s["unfinished"]:
             a.append(alert("amber", f"{n}: {s['unfinished']} run(s) with no answer",
                            "crashed, stopped, or the model server went away"))
@@ -623,6 +654,7 @@ def render(s):
         out.append(f"  {a['agent']:<12} {a['runs']} runs ({a['runs_today']} today) · {a['direct']} direct · "
                    f"{a['tool_calls']} tool calls · {timing}")
         out.append(f"  {'':<12} blocked {a['blocked']} · unverified {a['unverified']} · unfinished {a['unfinished']}"
+                   f"{' · errors ' + str(a['errors']) if a['errors'] else ''}"
                    f"{' · running ' + str(a['running']) if a['running'] else ''} · last {a['last_ago']}")
 
     out += ["", f"{bold}Tests{reset}"]
@@ -643,7 +675,10 @@ def describe(e):
     if ev == "question":
         return f"{e.get('chars')} chars · {e.get('model', '')}"
     if ev == "tool":
-        return " · ".join(x for x in (f"{e['tool']} {'ok' if e['ok'] else 'NOT OK'}", f"{e.get('seconds')} s", args) if x) + hidden
+        state = "ok" if e["ok"] else "NOT OK" + (f" ({e['error']})" if e.get("error") else "")
+        return " · ".join(x for x in (f"{e['tool']} {state}", f"{e.get('seconds')} s", args) if x) + hidden
+    if ev == "error":
+        return f"{e['where']} · {e['error']} · {e.get('seconds')} s"
     if ev == "blocked":
         return f"{e['tool']} · {e['reason']}"
     if ev == "answer":

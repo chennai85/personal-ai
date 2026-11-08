@@ -2,7 +2,7 @@
 
 Home scale, not enterprise. One Mac Studio, a few agents, one person watching.
 
-**Status:** Parts 1–2 of 4: terminal view, and the web page with live updates.
+**Status:** Parts 1–3 of 4: terminal view, the web page with live updates, and ledger v2 in `agent.py`.
 
 ## The idea
 
@@ -16,7 +16,7 @@ An agent I run by hand today and one that runs on a schedule later show up the s
 | Everything stays on my machines | No cloud, no dashboard service, no CDN. Stdlib Python only |
 | Read-only | One `open()`, read-binary. GET requests only. Tests watch every file call with Python's audit hook |
 | Never shows question text | The ledger stores a question's length only. Model-written text (tool arguments, block reasons, odd names) becomes a category or a count |
-| Default deny | Each agent declares which tool arguments are safe to show (`SAFE_ARGS`). A new agent shows none until it's listed |
+| Default deny | Each tool declares which arguments are safe (`"show"` in `agent.py`); the ledger keeps only those (v2). Old rows: the monitor's own `SAFE_ARGS`. Either way, only short tokens are shown |
 | Checks the constitution itself | A changed constitution stops the agents before they write anything. A quiet ledger is not proof all is well |
 
 ## What it reads
@@ -62,7 +62,7 @@ and scheduled runs later look the same.
 | Red | Amber |
 |---|---|
 | Constitution changed or missing | Constitution not approved yet |
-| Blocked call, unverified date, tool not ok (last 7 days) | Run with no answer (crashed or stopped) |
+| Blocked call, unverified date, tool not ok, run ended in an error (last 7 days) | Run with no answer (crashed or stopped) |
 | Permissions loosened | Ledger line I couldn't read |
 | Model server down, model missing | Test never run, or older than 14 days |
 | Values test missed, side-door code guard slipped, verify.sh failed | Side-door: the model slipped but the code held |
@@ -93,7 +93,7 @@ Safe to share: the Alerts, Now and Agents sections, and the tickers in Latest.
 
 | File | Checks | Mutations caught |
 |---|---|---|
-| `tests/test_monitor.sh` | 101: rules, privacy, read-only, settings, finding Tailscale | 36 / 36 |
+| `tests/test_monitor.sh` | 110: rules, privacy, read-only, settings, finding Tailscale, ledger v2 | 43 / 43 |
 | `tests/test_server.sh` | 78: addresses, Host names, methods, paths, headers, live rows, half lines, a replaced ledger, limits, read-only, the LaunchAgent file | 18 / 18 |
 
 Stand-ins only: a fake model server that writes down every method it sees, a fake Tailscale, made-up
@@ -102,8 +102,8 @@ the terminal, the JSON or the live stream. Python's audit hook watches every fil
 
 ## Known limits
 
-- Ledger v1 has no run id. If the same agent runs twice at once, the first run looks unfinished.
-  Part 3 adds `run` and a time zone to every row; the monitor already reads both.
+- Old (v1) rows have no run id. If the same agent ran twice at once before ledger v2, the first
+  run looks unfinished. New rows (v2, from `agent.py` on Nov 7) carry `run` and a time zone.
 - The tool name in a `blocked` row is chosen by the model. It's shown only if it looks like a
   plain name (`send_email`); anything else shows as `(hidden)`.
 - No password. Anyone on my Tailscale network can open the page; today that's only my devices.

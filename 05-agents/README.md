@@ -63,7 +63,23 @@ The model chooses. The code decides. The tool fetches. The code prints the facts
 | Agent | `earnings`: a purpose and a list of two tools. Nothing else |
 | Tools | `earnings_dates` (Yahoo Finance via yfinance: dates, estimate or confirmed, time of day; tickers fetched 6 at a time), `read_watchlist` (`~/vault/trading/watchlist.md`, no limit on how many). Both **read** tier |
 | Tiers | `read` allowed. `draft` and `act` not allowed in Phase 1. Send, delete, pay and trade aren't built at all |
-| Ledger | `~/vault/.agents/ledger.jsonl`: every question (length only, not the words), every tool call, every block. Private (600) |
+| Ledger | `~/vault/.agents/ledger.jsonl`: every question (length only, not the words), every tool call, every block. Private (600). The monitor (`06-monitor/`) reads it |
+
+## The ledger (v2, Nov 7, 2026)
+
+The contract every agent follows, including life admin. It stores what was done, never what was said.
+
+| Field | On | What |
+|---|---|---|
+| `v`, `time`, `agent`, `event`, `run` | every row | `v` is 2; `time` carries its zone (`2026-11-07T19:20:17-05:00`); `run` (6 characters) ties a question to its tool calls and its answer, so two runs at once stay apart |
+| `chars`, `model` | `question` | The question's length, never its words |
+| `tool`, `args`, `args_hidden`, `ok`, `seconds`, `error` | `tool` | `args` keeps only what the tool declares safe (`"show"` in `TOOLS`); the rest is a count. A tool that breaks: `ok: false`, `error` = the error's type, and the run goes on |
+| `tool`, `reason`, `args_chars` | `blocked` | `reason` is one of five kinds (no such tool · not on this agent's list · tool tier not allowed · arguments refused · tool budget reached). What the model sent is never stored, only its length. A tool name that isn't a plain name is stored as `null` |
+| `tool_calls`, `blocked`, `unverified`, `seconds` | `answer` | The end of a run |
+| `where`, `error`, `seconds` | `error` | The run ended without an answer (model server down, a bad reply). `error` is a type, never a message |
+| `tickers` | `direct` | The no-model baseline |
+
+A new tool declares `"show"`, or nothing it's given reaches the ledger. Default deny.
 
 ## Guards, in code
 
@@ -117,7 +133,7 @@ Dates are made up, my real watchlist isn't touched, and the run's ledger is a th
 ```bash
 cd ~/driving-range/ai-experiments/personal-ai && git pull
 cd 05-agents
-bash tests/test_agent.sh                                  # 69 checks, stand-in model, made-up dates
+bash tests/test_agent.sh                                  # 99 checks, stand-in model, made-up dates
 uv run agent.py tools                                     # what it can and can't do
 uv run agent.py earnings --direct NVDA AAPL MSFT          # facts only, no model: the baseline
 uv run agent.py earnings "When do NVDA, AAPL and MSFT report?"
@@ -145,7 +161,7 @@ uv run agent.py earnings "When does my watchlist report?"
 
 ## Tested (stand-in model)
 
-`bash tests/test_agent.sh`: 69 checks, all pass. Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
+`bash tests/test_agent.sh`: 99 checks, all pass (69 before ledger v2). Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
 
 To check the tests themselves, I broke each guard on purpose and re-ran them. Every break was caught. The first time, removing the "on this agent's list" check changed nothing: with one agent, every tool is on its list. That check is now tested directly.
 
@@ -173,7 +189,8 @@ The guard checked that every date came from the source. It didn't check how sure
 |---|---|
 | `agent.py` | The agent, tools, guards, ledger |
 | `sidedoor.py` | The side-door test: 7 planted instructions, real model, scored automatically |
-| `tests/test_agent.sh` | 69 checks with a stand-in model and made-up dates |
+| `tests/test_agent.sh` | 99 checks with a stand-in model and made-up dates, including ledger v2 and whether the monitor reads it |
 | `tests/mock_agent_ollama.py` | Stand-in model that calls tools in fixed ways (and misbehaves on purpose). `MOCK_OBEY=1` makes it follow every planted instruction |
-| `tests/guard_checks.py` | Direct checks: guards a single read-only agent never reaches, time-of-day conversion, and the Yahoo parser fed Apple's real answer |
+| `tests/guard_checks.py` | Direct checks: guards a single read-only agent never reaches, time-of-day conversion, the Yahoo parser fed Apple's real answer, a tool that crashes, undeclared arguments |
+| `tests/ledger_checks.py` | Ledger v2 checks on the ledger the test run wrote |
 | `WHY-THIS-DESIGN.md` | The decisions, and why |

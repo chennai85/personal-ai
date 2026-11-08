@@ -139,11 +139,48 @@ mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 check "ledger exists"                  test -f "$L"
 check "ledger is private (600)"        test "$(mode "$L")" = 600
 check "ledger folder is 700"           test "$(mode "$VAULT_DIR/.agents")" = 700
-check "blocked calls are recorded"     grep -q '"event": "blocked", "tool": "send_email"' "$L"
+OUT="$(python3 "$HERE/tests/ledger_checks.py" "$L" 2>&1)"
+for C in "every row v2" "every time has a zone" "every row has a run id" "one run per question" \
+         "every question has its own answer or error" "every tool row belongs to a question" \
+         "direct runs have their own id" "block reasons are kinds only" "blocked rows keep no arguments" \
+         "send_email recorded as no such tool" "bad ticker recorded as arguments refused" "budget recorded" \
+         "what the model sent is not in the ledger" "tool rows show declared args only" \
+         "watchlist reads show no args" "tickers still shown"; do
+  check "v2: $C"                       has "$C: yes" "$OUT"
+done
 check "questions aren't stored, only length" bash -c "! grep -q 'When do NVDA' '$L'"
 check "every line is valid JSON"       python3 -c "import json,sys; [json.loads(l) for l in open('$L')]"
 OUT="$(agent ledger -n 5 2>&1)"
 check "ledger command prints"          has "earnings" "$OUT"
+
+echo "==> when something breaks, the ledger says so"
+OUT="$(cd "$HERE" && MODEL_BASE_URL="http://127.0.0.1:1" uv run --quiet agent.py earnings 'When do NVDA report?' 2>&1)"; RC=$?
+check "model down: plain message"      has "STOP: could not reach" "$OUT"
+check "model down: says it's recorded" has "Recorded in the ledger." "$OUT"
+check "model down: exit not 0"         test "$RC" != 0
+LAST2="$(tail -2 "$L")"
+check "model down: question, then error, same run" python3 -c "
+import json,sys; q,e=[json.loads(l) for l in sys.argv[1].splitlines()]
+assert q['event']=='question' and e['event']=='error' and e['where']=='model' and e['run']==q['run'] and e['error']=='URLError'" "$LAST2"
+OUT="$(cd "$HERE" && uv run --quiet --with numpy --with pypdf --with python-docx --with fonttools python3 tests/guard_checks.py 2>&1)"
+check "tool crash: run goes on"        has "CRASH result {\"error\": \"the tool failed (ValueError)\"}" "$OUT"
+check "tool crash: ledger row, not ok" has "CRASH row tool boom_read ok False error ValueError" "$OUT"
+check "free-text reason never stored"  has "REASON refused" "$OUT"
+check "undeclared argument: a count"   has "SHOWN ['tickers'] hidden 1" "$OUT"
+check "odd tool name: not stored"      has "ODD NAME None no such tool" "$OUT"
+check "secret never stored"            bash -c "! grep -rqE 'SECRET-(REASON|CRASH|NOTE)|Send Email Now' '$VAULT_DIR/.agents'"
+
+echo "==> the monitor reads this ledger (06-monitor)"
+if [ -f "$HERE/../06-monitor/monitor.py" ]; then
+  MON="$(python3 "$HERE/../06-monitor/monitor.py" status --json --days 1 2>/dev/null)"
+  check "monitor: no false 'no answer'" python3 -c "import json,sys; s=json.loads(sys.argv[1]); a=s['agents'][0]; assert a['agent']=='earnings' and a['unfinished']==0, a" "$MON"
+  check "monitor: the error is red"     has '"what": "earnings: 1 run(s) ended in an error"' "$MON"
+  check "monitor: block kinds shown"    has '"reason": "no such tool"' "$MON"
+  check "monitor: tickers shown"        python3 -c "import json,sys; s=json.loads(sys.argv[1]); assert any('NVDA' in e.get('args',{}).get('tickers',[]) for e in s['recent'] if e['event'] in ('tool','direct'))" "$MON"
+  check "monitor: nothing unknown"      hasnt "(unknown)" "$MON"
+else
+  echo "  SKIP  monitor checks (06-monitor not here)"
+fi
 
 echo "==> the side door (sidedoor.py)"
 sd() { (cd "$HERE" && MODEL_BASE_URL="http://127.0.0.1:$1" uv run --quiet sidedoor.py); }

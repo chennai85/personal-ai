@@ -23,6 +23,8 @@ Guards (in code, not in the prompt):
   5. A budget: at most MAX_TOOL_CALLS tool calls per question.
   6. Every date in the answer must have come from the tool, or it's flagged.
   7. Every call, allowed or blocked, goes in the ledger: ~/vault/.agents/ledger.jsonl
+     Ledger v2: every row has a run id and a time zone. It stores what was done, never what was said:
+     a question's length, the tool arguments each tool declares safe ("show"), a block's category.
 
 Earnings dates come from Yahoo Finance (via yfinance). Yahoo says whether a date is its own
 estimate or announced by the company. Estimates and windows (two dates) are labelled; a
@@ -34,6 +36,7 @@ import datetime as dt
 import json
 import os
 import re
+import secrets
 import sys
 import time
 import urllib.request
@@ -59,11 +62,26 @@ TICKER = re.compile(r"^[A-Z]{1,5}([.-][A-Z]{1,2})?$")   # NVDA, BRK.B, BRK-B
 
 # ---------------------------------------------------------------------
 # The ledger: who did what, when. Append only. Lives in the vault.
+# v2 (Nov 2026): a run id ties a question to its tool calls and answer, so two runs at once
+# (a schedule and me) stay apart; the time carries its zone. The monitor (06-monitor) reads this.
 # ---------------------------------------------------------------------
-def ledger(agent, event, **fields):
+LEDGER_VERSION = 2
+BLOCK_KINDS = ("no such tool", "not on this agent's list", "tool tier not allowed",
+               "arguments refused", "tool budget reached")   # what a blocked row may say: nothing else
+PLAIN_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+
+
+def new_run():
+    return secrets.token_hex(3)          # 6 characters: enough to tell today's runs apart
+
+
+def ledger(agent, event, run=None, **fields):
+    if event == "blocked" and fields.get("reason") not in BLOCK_KINDS:
+        fields["reason"] = "refused"     # a reason that isn't one of the kinds never reaches the ledger
     AGENTS_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(AGENTS_DIR, 0o700)
-    row = {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "agent": agent, "event": event, **fields}
+    row = {"v": LEDGER_VERSION, "time": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+           "agent": agent, "event": event, "run": run, **fields}
     new = not LEDGER.exists()
     with open(LEDGER, "a") as f:
         f.write(json.dumps(row) + "\n")
@@ -199,6 +217,7 @@ def tool_read_watchlist():
 TOOLS = {
     "earnings_dates": {
         "tier": "read", "check": check_tickers, "run": tool_earnings_dates,
+        "show": ("tickers",),            # safe to show in the ledger and the monitor: public symbols
         "what": "next earnings date for each ticker, from Yahoo Finance",
         "schema": {"type": "function", "function": {
             "name": "earnings_dates",
@@ -209,6 +228,7 @@ TOOLS = {
     },
     "read_watchlist": {
         "tier": "read", "check": check_nothing, "run": lambda: tool_read_watchlist(),
+        "show": (),
         "what": "my tickers, from ~/vault/trading/watchlist.md",
         "schema": {"type": "function", "function": {
             "name": "read_watchlist",
@@ -241,23 +261,39 @@ AGENTS = {
 # ---------------------------------------------------------------------
 # The guard: every tool call goes through here
 # ---------------------------------------------------------------------
-def guarded_call(agent, name, args):
+def shown_args(name, clean):
+    """Only the arguments this tool declares safe to show go in the ledger. The rest: a count."""
+    show = TOOLS.get(name, {}).get("show", ())
+    return {k: v for k, v in clean.items() if k in show}, sum(1 for k in clean if k not in show)
+
+
+def guarded_call(agent, name, args, run=None):
     """Run a tool only if this agent may use it, at an allowed tier, with valid arguments."""
     tool = TOOLS.get(name)
     if tool is None:
-        reason = f"no such tool: {name}"
+        reason, kind = f"no such tool: {name}", "no such tool"
     elif name not in AGENTS[agent]["tools"]:
-        reason = f"{name} is not on the {agent} agent's list"
+        reason, kind = f"{name} is not on the {agent} agent's list", "not on this agent's list"
     elif tool["tier"] not in ALLOWED_TIERS:
-        reason = f"{name} is a '{tool['tier']}' tool; Phase 1 allows {sorted(ALLOWED_TIERS)} only"
+        reason, kind = f"{name} is a '{tool['tier']}' tool; Phase 1 allows {sorted(ALLOWED_TIERS)} only", "tool tier not allowed"
     else:
         clean, reason = tool["check"](args if isinstance(args, dict) else {})
+        kind = "arguments refused"
         if reason is None:
+            show, hidden = shown_args(name, clean)
             t0 = time.time()
-            result = tool["run"](**clean)
-            ledger(agent, "tool", tool=name, args=clean, ok=True, seconds=round(time.time() - t0, 2))
+            try:
+                result = tool["run"](**clean)
+            except Exception as e:        # a tool that breaks is recorded, and the run goes on
+                ledger(agent, "tool", run, tool=name, args=show, args_hidden=hidden, ok=False,
+                       error=e.__class__.__name__, seconds=round(time.time() - t0, 2))
+                return {"error": f"the tool failed ({e.__class__.__name__})"}, None
+            ledger(agent, "tool", run, tool=name, args=show, args_hidden=hidden, ok=True,
+                   seconds=round(time.time() - t0, 2))
             return result, None
-    ledger(agent, "blocked", tool=name, args=str(args)[:200], reason=reason)
+    # The reason on screen can quote what the model sent; the ledger keeps only its kind.
+    ledger(agent, "blocked", run, tool=name if PLAIN_NAME.match(str(name)) else None,
+           reason=kind, args_chars=len(json.dumps(args, default=str)))
     return {"blocked": reason}, reason
 
 
@@ -269,12 +305,8 @@ def chat(messages, tools):
             "tools": tools, "options": {"temperature": 0.1, "num_ctx": S["context"]}}
     req = urllib.request.Request(f"{S['model_url']}/api/chat", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=600) as r:
-            return json.loads(r.read())["message"]
-    except Exception as e:
-        sys.exit(f"STOP: could not reach {S['main_model']} at {S['model_url']} "
-                 f"({e.__class__.__name__}: {e})")
+    with urllib.request.urlopen(req, timeout=600) as r:      # failures are handled in run_agent
+        return json.loads(r.read())["message"]
 
 
 def run_agent(agent, question):
@@ -285,17 +317,24 @@ def run_agent(agent, question):
     system = f"{values}{spec['rules']}\n\nToday is {dt.date.today().isoformat()}."
     messages = [{"role": "system", "content": system}, {"role": "user", "content": question}]
     schemas = [TOOLS[n]["schema"] for n in spec["tools"]]
-    ledger(agent, "question", chars=len(question), model=S["main_model"])
+    run = new_run()
+    ledger(agent, "question", run, chars=len(question), model=S["main_model"])
 
     calls, facts, blocked, notes, t0 = 0, [], [], [], time.time()
     while True:
-        msg = chat(messages, schemas)
+        try:
+            msg = chat(messages, schemas)
+        except Exception as e:            # model server down, or a bad reply: say so in the ledger, then stop
+            ledger(agent, "error", run, where="model", error=e.__class__.__name__,
+                   seconds=round(time.time() - t0, 1))
+            sys.exit(f"STOP: could not reach {S['main_model']} at {S['model_url']} "
+                     f"({e.__class__.__name__}: {e}). Recorded in the ledger.")
         wanted = msg.get("tool_calls") or []
         if not wanted:
             break
         if calls + len(wanted) > MAX_TOOL_CALLS:
             blocked.append(f"budget: more than {MAX_TOOL_CALLS} tool calls")
-            ledger(agent, "blocked", reason=f"tool budget {MAX_TOOL_CALLS} reached")
+            ledger(agent, "blocked", run, tool=None, reason="tool budget reached", limit=MAX_TOOL_CALLS)
             msg = {"content": "Stopped: too many tool calls for one question. "
                               "The facts gathered so far are below."}
             break
@@ -309,7 +348,7 @@ def run_agent(agent, question):
                 except json.JSONDecodeError:
                     args = {"_unparsed": args}
             calls += 1
-            result, reason = guarded_call(agent, name, args)
+            result, reason = guarded_call(agent, name, args, run)
             if reason:
                 blocked.append(f"{name}: {reason}")
             elif name == "earnings_dates":
@@ -323,7 +362,7 @@ def run_agent(agent, question):
     unverified = sorted(set(re.findall(r"\b20\d\d-\d\d-\d\d\b", text)) - known - {dt.date.today().isoformat()})
     if not facts and text and not blocked:
         unverified.append("(no tool was called: any date above came from the model, not a source)")
-    ledger(agent, "answer", tool_calls=calls, blocked=len(blocked),
+    ledger(agent, "answer", run, tool_calls=calls, blocked=len(blocked),
            unverified=len(unverified), seconds=round(time.time() - t0, 1))
     return {"text": text, "facts": facts, "blocked": blocked, "unverified": unverified, "notes": notes,
             "calls": calls, "seconds": time.time() - t0}
@@ -352,7 +391,7 @@ def cmd_earnings(args):
         clean, reason = check_tickers({"tickers": args.words})
         if reason:
             sys.exit(f"Not run: {reason}")
-        ledger("earnings", "direct", tickers=clean["tickers"])
+        ledger("earnings", "direct", new_run(), tickers=clean["tickers"])
         print_facts(tool_earnings_dates(**clean)["results"])
         return
     if not args.words:
@@ -385,8 +424,8 @@ def cmd_ledger(args):
     lines = LEDGER.read_text().splitlines()[-args.n:]
     for line in lines:
         r = json.loads(line)
-        extra = {k: v for k, v in r.items() if k not in ("time", "agent", "event")}
-        print(f"{r['time']}  {r['agent']:<9}{r['event']:<9}{json.dumps(extra)}")
+        extra = {k: v for k, v in r.items() if k not in ("v", "time", "agent", "event", "run")}
+        print(f"{r['time'][:19].replace('T', ' ')}  {r.get('run') or '':<7}{r['agent']:<9}{r['event']:<9}{json.dumps(extra)}")
 
 
 def main():

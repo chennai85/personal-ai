@@ -153,6 +153,7 @@ function agentsView(s) {
                 tile(a.blocked, "blocked", a.blocked ? "t-red" : "t-green"),
                 tile(a.unverified, "unverified dates", a.unverified ? "t-red" : "t-green"),
                 tile(a.unfinished, "no answer", a.unfinished ? "t-amber" : "t-green"),
+                a.errors ? tile(a.errors, "ended in an error", "t-red") : null,
             ))))];
 }
 function tile(n, label, tone) {
@@ -164,7 +165,8 @@ function describe(e) {
     const hidden = e.hidden ? ` (+${e.hidden} hidden)` : "";
     switch (e.event) {
         case "question": return `${e.chars} chars · ${e.model || ""}`;
-        case "tool": return [`${e.tool} ${e.ok ? "ok" : "NOT OK"}`, `${e.seconds} s`, args].filter(Boolean).join(" · ") + hidden;
+        case "tool": return [`${e.tool} ${e.ok ? "ok" : "NOT OK" + (e.error ? ` (${e.error})` : "")}`, `${e.seconds} s`, args].filter(Boolean).join(" · ") + hidden;
+        case "error": return `${e.where} · ${e.error} · ${e.seconds} s`;
         case "blocked": return `${e.tool} · ${e.reason}`;
         case "answer": return `${e.tool_calls} calls · ${e.blocked} blocked · ${e.unverified} unverified · ${e.seconds} s`;
         case "direct": return args + hidden;
@@ -172,7 +174,7 @@ function describe(e) {
     }
 }
 function tone(e) {
-    if (e.event === "blocked" || (e.event === "tool" && !e.ok) || (e.event === "answer" && (e.unverified || e.blocked))) return "red";
+    if (e.event === "blocked" || e.event === "error" || (e.event === "tool" && !e.ok) || (e.event === "answer" && (e.unverified || e.blocked))) return "red";
     if (e.event === "answer") return "green";
     return "gray";
 }

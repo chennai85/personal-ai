@@ -1,6 +1,6 @@
 """Write made-up ledgers, test reports and Tailscale status for the monitor tests.
 
-    python3 fixtures.py ledger  KIND  PATH      KIND: clean | trouble | v2 | superseded | partial
+    python3 fixtures.py ledger  KIND  PATH      KIND: clean | trouble | v2 | v2-trouble | superseded | partial
     python3 fixtures.py report  KIND  FOLDER    KIND: values-ok | values-miss | values-unscored |
                                                       side-ok | side-code | side-model | old |
                                                       audit-ok | audit-fail
@@ -84,6 +84,24 @@ def ledger(kind, path):
             r2(5.9, "earnings", "question", "cc22dd", **q),
             r2(5.8, "earnings", "answer", "aa11bb", tool_calls=0, blocked=0, unverified=0, seconds=1.0),
             r2(5.7, "earnings", "answer", "cc22dd", tool_calls=0, blocked=0, unverified=0, seconds=1.1),
+        ]
+    elif kind == "v2-trouble":
+        # what agent.py v2 writes when things go wrong: kinds, errors, declared args only
+        tz = dt.datetime.now().astimezone().tzinfo
+
+        def r2(m, event, run, **f):
+            when = (NOW - dt.timedelta(minutes=m)).replace(tzinfo=tz).isoformat(timespec="seconds")
+            return json.dumps({"v": 2, "time": when, "agent": "earnings", "event": event, "run": run, **f})
+        lines = [
+            r2(9, "question", "aaaaaa", **q),
+            r2(8.9, "blocked", "aaaaaa", tool="read_bills", reason="not on this agent's list", args_chars=12),
+            r2(8.8, "blocked", "aaaaaa", tool=None, reason="tool budget reached", limit=4),
+            r2(8.7, "tool", "aaaaaa", tool="earnings_dates", args={"tickers": ["NVDA", "SECRET-V2 long text here"]},
+               args_hidden=2, ok=False, error="ValueError", seconds=0.1),
+            r2(8.6, "answer", "aaaaaa", tool_calls=2, blocked=2, unverified=0, seconds=3.0),
+            r2(5, "question", "bbbbbb", **q),
+            r2(4.9, "error", "bbbbbb", where="model", error="URLError", seconds=0.0),
+            r2(3, "error", "cccccc", where="SECRET where", error="Error: SECRET-MSG with spaces", seconds=0.0),
         ]
     elif kind == "superseded":
         # v1, no run ids: a question, then a new one 1 minute later before any answer

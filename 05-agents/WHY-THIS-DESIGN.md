@@ -11,7 +11,7 @@
 | Facts | Printed by the code from the tool's results, under the model's sentence | The model writes the sentence. The numbers come from the source, unchanged |
 | Date check | Every YYYY-MM-DD in the answer must appear in the tool's results | Catches a made-up date. Same idea as "cite every fact" in Step 3 |
 | Budget | 4 tool calls per question | A loop costs time and calls to Yahoo. 4 covers watchlist + dates with room to spare |
-| Ledger | `~/vault/.agents/ledger.jsonl`, append only, 600 | Who did what, when. The seed of Phase 2's "accounting". Stores question length, not words |
+| Ledger | `~/vault/.agents/ledger.jsonl`, append only, 600. v2 (Nov 7): run id, time zone, declared arguments only, block kinds, error rows | Who did what, when. The seed of Phase 2's "accounting". Stores question length, not words. v2 because the monitor needs to tell two runs apart, and because a ledger that copies what the model sent becomes the side door it was meant to watch |
 | Data source | Yahoo Finance via yfinance | No key, no account. Unofficial, so it can break or be wrong; the facts table names the source |
 | Confirmed vs estimate | Read Yahoo's raw `calendarEvents` (`isEarningsDateEstimate`), not yfinance's `.calendar`. Labels: confirmed / estimate / window / can't tell | Nov 7 run: late-January dates for MSFT and AAPL were Yahoo's guesses, shown as facts. `.calendar` drops the flag |
 | Raw call | `yf.Ticker(t)._quote._fetch(["calendarEvents"])`, yfinance pinned `<2`, falls back to `.calendar` ("can't tell") | It's yfinance's internal call; it can move between versions. Falling back is honest, not silent |
