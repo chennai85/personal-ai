@@ -29,6 +29,12 @@ def no_secret(obj):
 
 now = news.now_utc()
 
+# --- the stand-in feeds themselves: a missing file names itself, not three odd failures ---------
+NEEDED = ["bbc", "bbc-india", "bbc-tech", "dw", "france24", "france24-biz", "guardian", "indianexp",
+          "npr", "npr-biz", "npr-tech", "slashdot", "toi"]
+missing = [f"{n}.xml" for n in NEEDED if not (Path(os.environ["NEWS_FAKE"]) / f"{n}.xml").is_file()]
+check("stand-in feeds all present" + (f" (missing: {', '.join(missing)})" if missing else ""), not missing)
+
 # --- one feed, shaped -------------------------------------------------
 bbc = news.read_feed("bbc", now)
 titles = [s["title"] for s in bbc["stories"]]
