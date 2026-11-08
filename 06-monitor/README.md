@@ -2,7 +2,7 @@
 
 Home scale, not enterprise. One Mac Studio, a few agents, one person watching.
 
-**Status:** Parts 1–3 of 4: terminal view, the web page with live updates, and ledger v2 in `agent.py`.
+**Status:** ✅ Running on the Studio (Nov 7–8, 2026): terminal view, the web page with live updates, and ledger v2 in `agent.py`. Why each choice: [WHY-THIS-DESIGN.md](WHY-THIS-DESIGN.md). The visual version: [learn.aishree.me/step6_monitor.html](https://learn.aishree.me/step6_monitor.html).
 
 ## The idea
 
@@ -97,6 +97,7 @@ Safe to share: the Alerts, Now and Agents sections, and the tickers in Latest.
 |---|---|---|
 | `tests/test_monitor.sh` | 110: rules, privacy, read-only, settings, finding Tailscale, ledger v2 | 43 / 43 |
 | `tests/test_server.sh` | 82: addresses, Host names, methods, paths, headers, live rows, half lines, a replaced ledger, the oldest stream giving way, pings, read-only, the LaunchAgent file | 22 / 23 (the one left changes nothing a page can see) |
+| `05-agents/tests/test_agent.sh` (ledger part) | Ledger v2 rows, and the monitor reading the ledger the agent just wrote | 14 / 14 |
 
 Stand-ins only: a fake model server that writes down every method it sees, a fake Tailscale, made-up
 ledgers and reports. Private-looking text is planted on purpose (`SECRET-*`); none of it may reach
@@ -112,3 +113,4 @@ the terminal, the JSON or the live stream. Python's audit hook watches every fil
   Same stance as the model server in Phase 1.
 - The install script and the page's look were checked on Linux and in a headless browser at
   390 px and desktop width. The LaunchAgent itself only runs on the Studio.
+- Not yet opened on the iPhone. The layout was checked at phone width in a headless browser only.
