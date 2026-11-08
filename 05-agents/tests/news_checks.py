@@ -79,7 +79,7 @@ broken = news.read_feed("npr-tech", now)
 check("broken XML: error type only", broken["error"] == "FeedNotUnderstood" and not broken["stories"])
 page = news.read_feed("bbc-tech", now)
 check("an HTML page is not a feed", page["error"] == "FeedNotUnderstood" and no_secret(page))
-missing = news.read_feed("france24-biz", now)
+missing = news.read_feed("gdn-tech", now)
 check("missing feed: error, no crash", missing["error"] == "LookupError")
 big = Path(os.environ["NEWS_FAKE"]) / "guardian-biz.xml"
 big.write_bytes(b"<rss>" + b" " * (news.MAX_BYTES + 10) + b"</rss>")
@@ -92,6 +92,16 @@ try:
 except KeyError:
     ok = True
 check("a feed name not in FEEDS is never fetched", ok)
+check("Al Jazeera removed from the feed list", "aljazeera" not in news.FEEDS
+      and not any("aljazeera" in f["url"] for f in news.FEEDS.values()))
+
+ie = news.read_feed("indianexp", now)
+check("indianexp: headline-only feed kept, empty summary, full text never read",
+      ie["ok"] and len(ie["stories"]) == 1 and ie["stories"][0]["summary"] == "" and no_secret(ie))
+import re as _re
+TOKEN = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,11}$")      # 06-monitor/monitor.py
+check("every feed name is a token the monitor can show", all(TOKEN.match(n) for n in news.FEEDS))
+check("every feed in use is https", all(f["url"].startswith("https://") for f in news.FEEDS.values() if f["use"]))
 
 # --- links: the rule on its own ------------------------------------------
 cl = news.clean_link
@@ -102,12 +112,12 @@ check("link: odd port refused", cl("https://www.bbc.com:8443/a", ("bbc.com",)) i
 check("link: odd characters removed from the path", cl('https://www.bbc.com/a"><b>', ("bbc.com",)) == "https://www.bbc.com/ab")
 
 # --- gather: repeats dropped, events grouped, thin labelled ------------
-got = news.gather(["bbc", "bbc-india", "npr", "guardian", "aljazeera", "dw", "france24", "cnn", "npr-biz"], now)
+got = news.gather(["bbc", "bbc-india", "npr", "guardian", "france24-biz", "dw", "france24", "cnn", "npr-biz"], now)
 groups = got["groups"]
 all_links = [s["link"] for gr in groups for s in gr["members"]]
 check("gather: same link in two BBC feeds kept once", all_links.count("https://www.bbc.com/news/articles/c1ceasefire") == 1)
 cg = [gr for gr in groups if any("ceasefire" in s["title"].lower() for s in gr["members"])]
-check("gather: one event from four outlets grouped", len(cg) == 1 and cg[0]["outlets"] == ["Al Jazeera", "BBC", "NPR", "The Guardian"])
+check("gather: one event from four outlets grouped", len(cg) == 1 and cg[0]["outlets"] == ["BBC", "France 24", "NPR", "The Guardian"])
 fl = [gr for gr in groups if any("Flood" in s["title"] for s in gr["members"])]
 check("gather: same event worded differently grouped", len(fl) == 1 and len(fl[0]["outlets"]) == 2)
 dwg = [gr for gr in groups if gr["lead"]["outlet"] == "DW"]
