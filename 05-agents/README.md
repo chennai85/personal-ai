@@ -133,7 +133,7 @@ Dates are made up, my real watchlist isn't touched, and the run's ledger is a th
 ```bash
 cd ~/driving-range/ai-experiments/personal-ai && git pull
 cd 05-agents
-bash tests/test_agent.sh                                  # 194 checks, stand-in model, made-up dates, stand-in feeds
+bash tests/test_agent.sh                                  # 229 checks, stand-in model, made-up dates, stand-in feeds
 uv run agent.py tools                                     # what it can and can't do
 uv run agent.py earnings --direct NVDA AAPL MSFT          # facts only, no model: the baseline
 uv run agent.py earnings "When do NVDA, AAPL and MSFT report?"
@@ -161,7 +161,7 @@ uv run agent.py earnings "When does my watchlist report?"
 
 ## Tested (stand-in model)
 
-`bash tests/test_agent.sh`: 194 checks, all pass (99 before the news feeds, 69 before ledger v2). Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
+`bash tests/test_agent.sh`: 229 checks, all pass (99 before the news feeds, 69 before ledger v2). Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
 
 To check the tests themselves, I broke each guard on purpose and re-ran them. Every break was caught. The first time, removing the "on this agent's list" check changed nothing: with one agent, every tool is on its list. That check is now tested directly.
 
@@ -180,6 +180,8 @@ My second agent. Not a headline list (I can skim sites myself): **trends and con
 | Interests | `~/vault/me/interests.md`, my words: Follow closely ×2, Travel ×2, Sometimes ×1, Never = removed |
 | India | At most 1 India-only story per brief; a watchlist story always gets through |
 | Briefs | Saved under `~/vault/_news/`, which memory search never indexes |
+| Trends | **Counts only**: how many outlets mentioned each of my terms, watchlist companies and recurring names each day, in `~/vault/_news/counts/` (600, kept 60 days). No headlines. A name is kept only if 2+ outlets used it. Rising = 2× the 7-day average and 2+ more; new = 3+ outlets today, none before (watchlist: 2). Needs 4 days of counts. Never-topics aren't counted |
+| Schedule | `install_news_count.sh`: a LaunchAgent counts every day at 3:30 am. My first scheduled run. One logbook row per run (agent `news`, event `direct`, counts only), so the monitor's Live tab shows it |
 
 **Feeds (22 in use, all checked live Nov 8):** BBC (world, business, tech, India, US & Canada), NPR (world, business, tech), DW, France 24 (main, business-tech), The Guardian (world, tech, business), NBC, CBS (main, US), LA Times, The Hindu, NDTV, Indian Express, Slashdot. Listed but off: NYT (world, US), FT, Times of India. Removed: Al Jazeera (my choice); WSJ and CNN (stale for years); The Economist (weekly).
 
@@ -187,9 +189,12 @@ My second agent. Not a headline list (I can skim sites myself): **trends and con
 uv run news.py feeds       # which feeds work, counts only
 uv run news.py names       # my watchlist's company names
 uv run news.py preview     # the ranked stories, no model
+uv run news.py count       # save today's counts (the 3:30 am job does this)
+uv run news.py trends      # what's rising or new, once there are 4 days of counts
+bash install_news_count.sh          # schedule the 3:30 am count (status | now | remove)
 ```
 
-Mutation check: 54 guards broken on purpose, 54 caught. The first pass caught 23/32. The survivors added checks, removed one rule that wasn't needed, and found two real gaps: feed boilerplate, and text hidden inside `<iframe>` reaching the summary.
+Mutation check: 74 guards broken on purpose, 74 caught, after a baseline run proves the checks pass on the real code (a check that always fails would "catch" everything). The first pass caught 23/32. The survivors added checks, removed one rule and two lines that did nothing, and found real gaps: feed boilerplate, text hidden inside `<iframe>` reaching the summary, and never-topic stories feeding the counts.
 
 ## What the real runs found
 
@@ -215,9 +220,10 @@ The guard checked that every date came from the source. It didn't check how sure
 |---|---|
 | `agent.py` | The agent, tools, guards, ledger |
 | `sidedoor.py` | The side-door test: 7 planted instructions, real model, scored automatically |
-| `tests/test_agent.sh` | 194 checks with a stand-in model, made-up dates and stand-in feeds, including ledger v2 and whether the monitor reads it |
+| `tests/test_agent.sh` | 229 checks with a stand-in model, made-up dates and stand-in feeds, including ledger v2 and whether the monitor reads it |
 | `news.py` | The news agent's feeds and shaping (Part 1): `feeds` checks every feed, `preview` ranks stories by my interests, no model |
-| `tests/news_checks.py` | 88 checks on feeds, shaping, ranking, India cap and watchlist names, run by `test_agent.sh` |
+| `tests/news_checks.py` | 117 checks on feeds, shaping, ranking, India cap, watchlist names, counts and trends, run by `test_agent.sh` |
+| `install_news_count.sh` | The 3:30 am count, as a LaunchAgent (`com.drivingrange.newscount`) |
 | `tests/news_feeds/` | Stand-in feeds, each broken on purpose: HTML inside, full article text, hidden characters, off-site links, a stale feed, an XML bomb, a web page pretending to be a feed |
 | `tests/mock_agent_ollama.py` | Stand-in model that calls tools in fixed ways (and misbehaves on purpose). `MOCK_OBEY=1` makes it follow every planted instruction |
 | `tests/guard_checks.py` | Direct checks: guards a single read-only agent never reaches, time-of-day conversion, the Yahoo parser fed Apple's real answer, a tool that crashes, undeclared arguments |

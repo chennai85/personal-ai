@@ -276,5 +276,106 @@ check("names: a failed fetch keeps the old name", names2["AVGO"] == "Broadcom" a
 news.fetch_name = real_fetch
 check("names: nothing secret saved", "SECRET-" not in news.NAMES.read_text())
 
+# --- trends: counts only -----------------------------------------------------
+ni = news.names_in
+check("names: proper names found, common words trimmed", ni("The Federal Reserve held rates on Monday.") == {"Federal Reserve"}
+      and "Strait of Hormuz" in ni("Envoys meet in the Strait of Hormuz") and ni("Bank of England holds") == {"Bank of England"})
+check("names: a trailing 'of' is trimmed", "Bank" in ni("Talks moved near the Bank of") and
+      not any(n.endswith(" of") for n in ni("Talks moved near the Bank of")))
+check("names: 'and' splits two names", ni("US and EU agree on tariffs") == {"US", "EU"})
+check("names: at most 4 words, never a sentence", all(len(n.split()) <= 4 for n in ni("Alpha Beta Gamma Delta Epsilon Zeta went home")))
+tc = news.group([story("Nvidia Shares Climb As AI Boom Continues", "NBC News"),
+                 story("Nvidia Shares Climb As AI Boom Continues", "CBS News")])
+check("count: names not taken from Title Case headlines", not any(len(k.split()) > 1 for k in
+      news.count_day(tc, {**it, "never": []}, {})["names"]))
+check("names: Title Case headlines skipped", news.title_case("Nvidia Shares Climb As AI Boom Continues")
+      and not news.title_case("Nvidia shares climb as AI boom continues"))
+
+cd = news.count_day(groups, it, {"NVDA": "NVIDIA", "AVGO": "Broadcom"})
+check("count: my terms counted by outlet", cd["terms"].get("Nvidia") == {"o": 1, "s": 1} and cd["terms"].get("chip") == {"o": 2, "s": 3})
+check("count: never-topic stories not counted", not any("celebrity" in k.lower() for k in cd["names"]) and cd["terms"]["Nvidia"]["o"] == 1)
+check("count: watchlist counted", cd["watch"] == {"NVDA": {"o": 1, "s": 1}})
+check("count: names need 2+ outlets", cd["names"].get("Cairo", {}).get("o") == 4
+      and all(v["o"] >= 2 for v in cd["names"].values()))
+flat = json.dumps(cd)
+check("count: no headline or summary kept", no_secret(cd) and not any(
+      s["title"] in flat or (s["summary"] and s["summary"] in flat) for g in groups for s in g["members"]))
+
+D = news.dt.date
+for f in list(news.COUNTS.glob("*")) if news.COUNTS.exists() else []:
+    f.unlink()
+def day_counts(n_cairo, n_tariff=0, extra=None):
+    d = {"terms": {}, "watch": {}, "names": {"Cairo": {"o": n_cairo, "s": n_cairo}}}
+    if n_tariff:
+        d["terms"]["tariff"] = {"o": n_tariff, "s": n_tariff}
+    d.update(extra or {})
+    return d
+stats = {"feeds": 22, "feeds_ok": 22, "stories": 200, "events": 150}
+news.BRIEFS.mkdir(parents=True, exist_ok=True)
+news.COUNTS.mkdir(parents=True, exist_ok=True)
+os.chmod(news.BRIEFS, 0o755)
+os.chmod(news.COUNTS, 0o755)                     # existing, looser folders get tightened
+news.save_counts(D(2026, 11, 1), {**day_counts(1), "names": {"Cairo": {"o": 1, "s": 1}, "Steady": {"o": 4, "s": 4},
+                                                              "Return": {"o": 3, "s": 3}}}, stats)
+news.save_counts(D(2026, 11, 2), day_counts(1, 1), stats)
+news.save_counts(D(2026, 11, 3), day_counts(2, 1), stats)
+early = news.trends(D(2026, 11, 4), today=day_counts(6))
+check("trends: not ready before MIN_HISTORY days", early["ready"] is False and early["days"] == 3)
+news.save_counts(D(2026, 11, 5), {**day_counts(1, 1), "names": {"Cairo": {"o": 1, "s": 1}, "Steady": {"o": 4, "s": 4}}}, stats)  # Nov 4 missing on purpose
+today = day_counts(6, 4, {"watch": {"AVGO": {"o": 2, "s": 3}, "NVDA": {"o": 1, "s": 1}},
+                          "names": {"Cairo": {"o": 6, "s": 9}, "Hormuz": {"o": 3, "s": 3}, "Gaza": {"o": 2, "s": 2},
+                                    "Steady": {"o": 5, "s": 5}, "Return": {"o": 4, "s": 4}}})
+news.save_counts(D(2026, 11, 2), {**day_counts(1, 1), "names": {"Cairo": {"o": 1, "s": 1}, "Steady": {"o": 4, "s": 4}}}, stats)
+news.save_counts(D(2026, 11, 3), {**day_counts(2, 1), "names": {"Cairo": {"o": 2, "s": 2}, "Steady": {"o": 4, "s": 4}}}, stats)
+tr = news.trends(D(2026, 11, 6), today=today)
+keys = lambda rows: [r["key"] for r in rows]
+check("trends: ready with 4 days (a missing day is fine)", tr["ready"] and tr["days"] == 4)
+check("trends: rising = 2x the average and 2+ more", "Cairo" in keys(tr["rising"]) and "tariff" in keys(tr["rising"]))
+check("trends: back after going quiet = rising, not new", "Return" in keys(tr["rising"]) and "Return" not in keys(tr["new"]))
+check("trends: steady coverage is not a trend", "Steady" not in keys(tr["rising"]) + keys(tr["new"]))
+check("trends: new = 3+ outlets today, none before", "Hormuz" in keys(tr["new"]) and "Gaza" not in keys(tr["new"]))
+check("trends: a watchlist company needs only 2 outlets", "AVGO" in keys(tr["new"]) and "NVDA" not in keys(tr["new"] + tr["rising"]))
+check("trends: watchlist listed first", tr["new"][0]["key"] == "AVGO")
+cairo = [r for r in tr["rising"] if r["key"] == "Cairo"][0]
+check("trends: day-by-day series, missing days shown as None", cairo["series"] == [None, None, 1, 1, 2, None, 1, 6])
+check("counts: saved 600 in 700 folders", oct((news.COUNTS / "2026-11-05.json").stat().st_mode)[-3:] == "600"
+      and oct(news.COUNTS.stat().st_mode)[-3:] == "700")
+(news.COUNTS / "2026-08-01.json").write_text("{}")
+(news.COUNTS / "notes.txt").write_text("mine")
+news.save_counts(D(2026, 11, 6), today, stats)
+check("counts: older than KEEP_DAYS deleted; other files left alone",
+      not (news.COUNTS / "2026-08-01.json").exists() and (news.COUNTS / "notes.txt").exists()
+      and (news.COUNTS / "2026-11-01.json").exists())
+
+# --- the count command: counts file + one logbook row, counts only ----------
+import agent  # noqa: E402
+before = agent.LEDGER.read_text().splitlines() if agent.LEDGER.exists() else []
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    rc = news.cmd_count(None)
+rows = [json.loads(x) for x in agent.LEDGER.read_text().splitlines()[len(before):]]
+row = rows[0] if rows else {}
+check("count: one logbook row, agent news, event direct", len(rows) == 1 and row.get("agent") == "news"
+      and row.get("event") == "direct" and row.get("v") == 2 and len(row.get("run") or "") == 6)
+check("count: logbook row holds counts only", set(row) == {"v", "time", "agent", "event", "run", "feeds", "feeds_ok",
+      "stories", "events", "names", "seconds"} and all(isinstance(row[k], (int, float)) for k in
+      ("feeds", "feeds_ok", "stories", "events", "names", "seconds")))
+saved = news.load_counts(news.now_utc().astimezone().date())
+check("count: today's counts saved", saved and saved["feeds"] == len([n for n, f in news.FEEDS.items() if f["use"]]))
+out = buf.getvalue()
+check("count: prints counts only", out.startswith("Counted ") and no_secret(out) and "Cairo" not in out)
+check("count: exit 1 when fewer than half the feeds work", rc == 1)
+real_gather = news.gather
+news.gather = lambda *a, **k: (_ for _ in ()).throw(TimeoutError())
+try:
+    news.cmd_count(None)
+    raised = False
+except TimeoutError:
+    raised = True
+news.gather = real_gather
+err = json.loads(agent.LEDGER.read_text().splitlines()[-1])
+check("count: a failure leaves an error row (type only) and still fails",
+      raised and err["event"] == "error" and err["where"] == "count" and err["error"] == "TimeoutError")
+
 print(f"\nnews checks: {PASS} pass · {FAIL} fail")
 sys.exit(1 if FAIL else 0)

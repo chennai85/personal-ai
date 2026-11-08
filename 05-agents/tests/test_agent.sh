@@ -221,7 +221,23 @@ check "news preview: ids and outlets"  has "[s1]" "$OUT"
 check "news preview: nothing secret"   hasnt "SECRET-" "$OUT"
 OUT="$(news feeds evil 2>&1)"; RC=$?
 check "news feeds: unknown name refused" bash -c "[ $RC != 0 ] && grep -q 'no feed called' <<<\"\$1\"" _ "$OUT"
-check "news: nothing written to the ledger" bash -c "! grep -q '\"agent\": \"news\"' '$L'"
+check "news: only count rows in the logbook (direct or error)" python3 -c "
+import json,sys
+rows=[json.loads(l) for l in open(sys.argv[1]) if '\"news\"' in l]
+assert rows and all(r['event'] in ('direct','error') for r in rows), rows" "$L"
+OUT="$(news trends 2>&1)"
+check "news trends: rising and new, outlets by day" bash -c "grep -q '^Rising:' <<<\"\$1\" && grep -q 'outlets by day' <<<\"\$1\"" _ "$OUT"
+check "news trends: no headlines"         hasnt "Ceasefire talks" "$OUT"
+if [ -f "$HERE/../06-monitor/monitor.py" ]; then
+  MON="$(python3 "$HERE/../06-monitor/monitor.py" status --json --days 1 2>/dev/null)"
+  check "monitor: the news count shows as agent news" python3 -c "import json,sys; s=json.loads(sys.argv[1]); assert any(a['agent']=='news' for a in s['agents']), s['agents']" "$MON"
+  check "monitor: still nothing unknown"  hasnt "(unknown)" "$MON"
+  check "monitor: no headlines reach it"  bash -c "! grep -qi 'ceasefire\|nvidia shares\|SECRET-' <<<\"\$1\"" _ "$MON"
+fi
+INST="$HERE/install_news_count.sh"
+check "installer: shell syntax"           bash -n "$INST"
+PL="$(DR_ROOT="$TMP/dr" bash "$INST" --print 2>/dev/null)"
+check "installer: plist is valid"         python3 -c "import plistlib,sys; p=plistlib.loads(sys.argv[1].encode()); assert p['Label']=='com.drivingrange.newscount' and p['StartCalendarInterval']=={'Hour':3,'Minute':30} and p['ProgramArguments'][-2:]==['news.py','count'] and p['RunAtLoad'] is False" "$PL"
 unset NEWS_FAKE NEWS_NOW NEWS_NAMES_FAKE
 
 echo "==> step 4 still guards the agent"

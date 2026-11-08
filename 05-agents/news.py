@@ -8,6 +8,8 @@ news.py: the news agent's feeds and shaping, on the Mac Studio.
     uv run news.py feeds            check every feed: works, stale, failed (counts only)
     uv run news.py preview          the stories the brief would start from, ranked by my interests (no model)
     uv run news.py names            my watchlist's company names (from Yahoo, saved, refreshed weekly)
+    uv run news.py count            save today's counts (no headlines) for trends; runs at 3:30 am
+    uv run news.py trends           what's rising or new across outlets, from those counts
 
 Rules (in code):
   1. Only the feeds in FEEDS are ever fetched. Never an article page, never a URL from the model.
@@ -23,6 +25,9 @@ Rules (in code):
      per brief, unless a story is about my watchlist.
   8. Watchlist: read with the earnings agent's own rule (ticker lines only). Company names come from
      Yahoo, cleaned like any outside text, saved under ~/vault/_news/, refreshed weekly.
+  9. Trends come from counts only: how many outlets mentioned each of my terms, watchlist companies
+     and recurring names each day. No headlines or summaries are kept. A name is kept only if 2+
+     outlets used it that day; a trend needs MIN_OUTLETS outlets today and MIN_HISTORY days of counts.
 
 Interests come from ~/vault/me/interests.md (my words). Briefs are saved under ~/vault/_news/,
 which memory.py ingest skips, so outside text never reaches memory search.
@@ -62,6 +67,11 @@ FEED_MAX = 20           # stories per feed (its freshest), so one busy feed can'
 INDIA_MAX = 1           # India-only stories per brief (Sri, Nov 8); watchlist stories always get through
 NAMES = BRIEFS / "names.json"
 NAMES_DAYS = 7          # company names refreshed weekly
+COUNTS = BRIEFS / "counts"
+KEEP_DAYS = 60          # counts older than this are deleted
+TREND_DAYS = 7          # a trend is measured against the 7 days before
+MIN_HISTORY = 4         # days of counts needed before trends mean anything
+MIN_OUTLETS = 3         # a trend needs this many outlets today (a planted story is one outlet)
 FETCH_WORKERS = 6
 TIMEOUT = 15
 USER_AGENT = "personal-ai-news/1.0 (one person's morning brief; reads RSS only)"
@@ -510,6 +520,143 @@ def watch_names(today=None, refresh=False):
 
 
 # ---------------------------------------------------------------------
+# Trends: counts only, kept by day. Today vs the 7 days before.
+# ---------------------------------------------------------------------
+NOT_NAMES = set("""The A An In On At Of For And But Or To From By With As Is Are Was Were Be Has Have Had
+How Why What Who When Where Which This That These Those It Its He She They We You I His Her Their Our
+Mr Mrs Ms Dr New After Before Over Under More Most Some All No Not Will Can Could Would Should May
+Says Said Say Watch Live Video Videos Photos Opinion Analysis Review Updates Update Breaking Exclusive
+Report Here Inside Latest First Last Top Why Today Tonight Yesterday Week Year Monday Tuesday Wednesday
+Thursday Friday Saturday Sunday January February March April May June July August September October
+November December""".split())
+LINKERS = {"of", "the", "de", "for", "al", "bin", "von", "van"}   # never "and": "US and EU" is two names
+PHRASE_OK = re.compile(r"^[A-Z][A-Za-z0-9&'.-]*( [A-Za-z0-9&'.-]+){0,3}$")
+
+
+def names_in(text):
+    """Capitalised runs of 1-4 words ("Federal Reserve", "Strait of Hormuz", "Nvidia"), common words
+    trimmed. Only what a run of capitals looks like: never a sentence."""
+    found = set()
+    run = []
+
+    def close():
+        while run and run[-1] in LINKERS:          # "Bank of" → "Bank"
+            run.pop()
+        if run:                                    # PHRASE_OK allows 1-4 words
+            phrase = " ".join(run)
+            if 2 <= len(phrase) <= 40 and PHRASE_OK.match(phrase):
+                found.add(phrase)
+        run.clear()
+    for raw in re.split(r"\s+", text):
+        w = raw.strip("\"“”‘’()[]{}:;,!?|—–")
+        ends = raw.rstrip("\"”’)").endswith((".", ",", ":", ";", "!", "?", "—"))
+        if w and w[0].isupper() and w.rstrip(".") not in NOT_NAMES:
+            run.append(w.rstrip("."))
+        elif w.lower() in LINKERS and run:
+            run.append(w.lower())
+        else:
+            close()
+        if ends or len(run) > 4:
+            close()
+    close()
+    return found
+
+
+def title_case(title):
+    """NBC and CBS capitalise every word of a headline: no help finding names."""
+    ws = [w for w in title.split() if w[:1].isalpha()]
+    return len(ws) >= 4 and sum(w[0].isupper() for w in ws) / len(ws) >= 0.75
+
+
+def count_day(groups, interests, watch):
+    """→ today's counts: for each of my terms, watchlist tickers and recurring names, how many
+    outlets ("o") and stories ("s") mentioned it. Names with only one outlet are not kept.
+    Stories on a never-topic are skipped."""
+    out = {"terms": {}, "watch": {}, "names": {}}
+    terms = interests["close"] + interests["some"] + interests["travel"]
+
+    def add(kind, key, outlet):
+        e = out[kind].setdefault(key, {"o": set(), "s": 0})
+        e["o"].add(outlet)
+        e["s"] += 1
+    for g in groups:
+        for st in g["members"]:
+            text = f"{st['title']} {st['summary']}"
+            if matches(interests["never"], text):    # never shown, never counted
+                continue
+            for t in matches(terms, text):
+                add("terms", t, st["outlet"])
+            for t in watch_hits(watch, text):
+                add("watch", t, st["outlet"])
+            title_names = set() if title_case(st["title"]) else names_in(st["title"])
+            for n in title_names | names_in(st["summary"]):
+                add("names", n, st["outlet"])
+    for kind in out:
+        out[kind] = {k: {"o": len(v["o"]), "s": v["s"]} for k, v in sorted(out[kind].items())
+                     if kind != "names" or len(v["o"]) >= 2}
+    return out
+
+
+def save_counts(day, counts, stats):
+    COUNTS.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for d in (BRIEFS, COUNTS):
+        os.chmod(d, 0o700)
+    path = COUNTS / f"{day.isoformat()}.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"v": 1, "date": day.isoformat(), **stats, **counts}, indent=1))
+    os.chmod(tmp, 0o600)
+    tmp.replace(path)
+    for f in COUNTS.iterdir():                 # only files this code wrote: YYYY-MM-DD.json
+        m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\.json", f.name)
+        if m and (day - dt.date.fromisoformat(m.group(1))).days > KEEP_DAYS:
+            f.unlink()
+    return path
+
+
+def load_counts(day):
+    try:
+        return json.loads((COUNTS / f"{day.isoformat()}.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def trends(day, today=None):
+    """Rising: outlets today ≥ 2× the 7-day average and at least 2 more. New: in MIN_OUTLETS+ outlets
+    today, in none before. Watchlist companies need only 2 outlets. Needs MIN_HISTORY days of counts."""
+    today = today or load_counts(day)
+    past = [load_counts(day - dt.timedelta(days=i)) for i in range(TREND_DAYS, 0, -1)]
+    have = [h for h in past if h]
+    res = {"ready": bool(today) and len(have) >= MIN_HISTORY, "days": len(have), "rising": [], "new": []}
+    if not res["ready"]:
+        return res
+    for kind in ("watch", "terms", "names"):
+        floor = 2 if kind == "watch" else MIN_OUTLETS
+        for key, v in today.get(kind, {}).items():
+            if v["o"] < floor:
+                continue
+            series = [(h.get(kind, {}).get(key, {}).get("o", 0) if h else None) for h in past]
+            known = [x for x in series if x is not None]
+            base = sum(known) / len(known)
+            row = {"kind": kind, "key": key, "today": v["o"], "base": round(base, 1), "series": series + [v["o"]]}
+            if not any(known):
+                res["new"].append(row)
+            elif v["o"] >= 2 * base and v["o"] - base >= 2:
+                res["rising"].append(row)
+    order = {"watch": 0, "terms": 1, "names": 2}
+    res["rising"].sort(key=lambda r: (order[r["kind"]], -(r["today"] - r["base"])))
+    res["new"].sort(key=lambda r: (order[r["kind"]], -r["today"]))
+    res["rising"], res["new"] = res["rising"][:10], res["new"][:10]
+    return res
+
+
+def ledger_row(event, **fields):
+    """The same logbook as every agent: agent `news`, counts only."""
+    sys.path.insert(0, str(HERE))
+    import agent
+    agent.ledger("news", event, agent.new_run(), **fields)
+
+
+# ---------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------
 def cmd_feeds(args):
@@ -570,6 +717,50 @@ def cmd_names(args):
     return 0
 
 
+def cmd_count(args):
+    """Save today's counts. Scheduled at 3:30 am (install_news_count.sh). Counts only, here and in
+    the logbook: never a headline."""
+    t0 = dt.datetime.now()
+    try:
+        got = gather()
+        interests, watch = read_interests(), watch_names()
+        counts = count_day(got["groups"], interests, watch)
+        ok = sum(f["ok"] and not f["stale"] for f in got["feeds"])
+        stats = {"feeds": len(got["feeds"]), "feeds_ok": ok,
+                 "stories": sum(len(g["members"]) for g in got["groups"]), "events": len(got["groups"])}
+        day = now_utc().astimezone().date()
+        save_counts(day, counts, stats)
+        hist = sum(1 for i in range(1, TREND_DAYS + 1) if load_counts(day - dt.timedelta(days=i)))
+    except Exception as e:
+        ledger_row("error", where="count", error=e.__class__.__name__,
+                   seconds=round((dt.datetime.now() - t0).total_seconds(), 1))
+        raise
+    ledger_row("direct", **stats, names=len(counts["names"]),
+               seconds=round((dt.datetime.now() - t0).total_seconds(), 1))
+    print(f"Counted {day}: {ok}/{stats['feeds']} feeds · {stats['stories']} stories · {stats['events']} events · "
+          f"{len(counts['terms'])} of my terms · {len(counts['watch'])} watchlist · {len(counts['names'])} names · "
+          f"history {hist} day(s)" + ("" if hist >= MIN_HISTORY else f" (trends start at {MIN_HISTORY})"))
+    return 0 if ok * 2 >= stats["feeds"] else 1
+
+
+def cmd_trends(args):
+    """What's rising or new. My terminal only."""
+    day = now_utc().astimezone().date()
+    res = trends(day)
+    if not load_counts(day):
+        print("No counts for today yet: run `uv run news.py count` first.")
+        return 1
+    if not res["ready"]:
+        print(f"Not enough history yet: {res['days']} of {MIN_HISTORY} days. Counts are saving; check back.")
+        return 0
+    for title, rows in (("Rising", res["rising"]), ("New", res["new"])):
+        print(f"{title}:" + ("" if rows else " nothing"))
+        for r in rows:
+            series = " ".join("-" if x is None else str(x) for x in r["series"])
+            print(f"  {r['key']:<28} {r['kind']:<6} outlets by day: {series}")
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(description="The news agent's feeds")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -582,6 +773,8 @@ def main():
     nm = sub.add_parser("names", help="my watchlist's company names")
     nm.add_argument("--refresh", action="store_true", help="fetch every name again now")
     nm.set_defaults(f=cmd_names)
+    sub.add_parser("count", help="save today's counts for trends (scheduled)").set_defaults(f=cmd_count)
+    sub.add_parser("trends", help="what's rising or new").set_defaults(f=cmd_trends)
     a = p.parse_args()
     sys.exit(a.f(a) or 0)
 
