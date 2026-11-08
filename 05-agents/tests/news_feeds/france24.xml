@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>France 24</title>
+<entry><title>Golf: young star wins in Dubai</title>
+<link rel="alternate" href="https://www.france24.com/en/sport/golf-dubai"/>
+<link rel="enclosure" href="https://cdn.example/img.jpg"/>
+<summary>A final-round 65 seals it.</summary>
+<content type="html">SECRET-ATOM-CONTENT full story</content>
+<updated>2026-11-08T03:00:00Z</updated></entry>
+</feed>

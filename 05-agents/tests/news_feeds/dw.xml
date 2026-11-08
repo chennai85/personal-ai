@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<channel rdf:about="https://www.dw.com"><title>DW</title></channel>
+<item rdf:about="https://www.dw.com/en/a-1"><title>Germany weighs new chip subsidies</title>
+<link>https://www.dw.com/en/germany-chips/a-1</link><description>Berlin debates support for semiconductor plants.</description>
+<dc:date>2026-11-08T06:15:00Z</dc:date></item>
+<item rdf:about="https://www.dw.com/en/a-2"><title>Chip subsidies: Germany weighs plant support</title>
+<link>https://www.dw.com/en/chip-subsidies/a-2</link><description>A second DW piece on the same debate.</description>
+<dc:date>2026-11-08T07:15:00Z</dc:date></item>
+</rdf:RDF>

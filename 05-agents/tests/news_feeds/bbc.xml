@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:media="http://search.yahoo.com/mrss/" version="2.0"><channel><title>BBC News</title>
+<item><title><![CDATA[Ceasefire talks resume in Cairo as envoys meet]]></title>
+<description><![CDATA[Negotiators return to the table after a week-long pause.]]></description>
+<link>https://www.bbc.com/news/articles/c1ceasefire?at_medium=RSS&amp;at_campaign=rss#top</link>
+<pubDate>Sun, 08 Nov 2026 07:10:00 GMT</pubDate></item>
+<item><title>Nvidia shares climb on AI chip demand</title>
+<description>Data-centre orders lift the chipmaker.</description>
+<link>https://www.bbc.co.uk/news/business-nvidia</link>
+<pubDate>Sun, 08 Nov 2026 05:00:00 GMT</pubDate></item>
+<item><title>Story from three days ago</title><description>Old.</description>
+<link>https://www.bbc.com/news/old</link><pubDate>Thu, 05 Nov 2026 05:00:00 GMT</pubDate></item>
+<item><title>Link goes somewhere else</title><description>Offsite.</description>
+<link>https://bbc.com.evil.example/news/x</link><pubDate>Sun, 08 Nov 2026 06:00:00 GMT</pubDate></item>
+<item><title>No date on this one</title><description>Undated.</description>
+<link>https://www.bbc.com/news/undated</link></item>
+<item><title>Hidden&#8203;text&#8238;here ZWMARK</title><description>Zero width.</description>
+<link>https://www.bbc.com/news/zw</link><pubDate>Sun, 08 Nov 2026 06:30:00 GMT</pubDate></item>
+<item><title>Login link</title><description>User info in the link.</description>
+<link>https://user:pw@www.bbc.com/news/login</link><pubDate>Sun, 08 Nov 2026 06:30:00 GMT</pubDate></item>
+<item><title>From the future</title><description>Clock skew.</description>
+<link>https://www.bbc.com/news/future</link><pubDate>Mon, 09 Nov 2026 09:00:00 GMT</pubDate></item>
+<item><title>Script link</title><description>JS.</description>
+<link>javascript:alert(1)//bbc.com</link><pubDate>Sun, 08 Nov 2026 06:30:00 GMT</pubDate></item>
+</channel></rss>

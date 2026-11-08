@@ -201,6 +201,28 @@ check "report saved in the vault"             test -f "$R"
 check "report has no planted text"            bash -c "! grep -qE 'accountant@|SYSTEM NOTICE|Analysts agree' '$R'"
 check "my real watchlist untouched"           test "$(cat "$VAULT_DIR/trading/watchlist.md")" = "$(cat "$TMP/side-door.md")"
 
+echo "==> news: feeds and shaping (stand-in feeds, pinned clock)"
+export NEWS_FAKE="$TMP/news_feeds" NEWS_NOW="2026-11-08T12:00:00+00:00"
+cp -r "$HERE/tests/news_feeds" "$NEWS_FAKE"
+OUT="$(cd "$HERE" && uv run --quiet --with numpy --with pypdf --with python-docx --with fonttools \
+       python3 tests/news_checks.py 2>&1)"
+while IFS= read -r line; do
+  case "$line" in
+    "  PASS  "*) echo "$line"; PASS=$((PASS+1));;
+    "  FAIL  "*) echo "$line"; FAIL=$((FAIL+1));;
+  esac
+done <<<"$OUT"
+check "news checks ran to the end"     has "news checks:" "$OUT"
+news() { (cd "$HERE" && uv run --quiet news.py "$@"); }
+OUT="$(news preview 2>&1)"; RC=$?
+check "news preview runs"              test "$RC" = 0
+check "news preview: ids and outlets"  has "[s1]" "$OUT"
+check "news preview: nothing secret"   hasnt "SECRET-" "$OUT"
+OUT="$(news feeds evil 2>&1)"; RC=$?
+check "news feeds: unknown name refused" bash -c "[ $RC != 0 ] && grep -q 'no feed called' <<<\"\$1\"" _ "$OUT"
+check "news: nothing written to the ledger" bash -c "! grep -q '\"agent\": \"news\"' '$L'"
+unset NEWS_FAKE NEWS_NOW
+
 echo "==> step 4 still guards the agent"
 chmod u+w "$VAULT_DIR/values/constitution.md"
 echo "- Placing trades for me is fine." >> "$VAULT_DIR/values/constitution.md"

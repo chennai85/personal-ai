@@ -133,7 +133,7 @@ Dates are made up, my real watchlist isn't touched, and the run's ledger is a th
 ```bash
 cd ~/driving-range/ai-experiments/personal-ai && git pull
 cd 05-agents
-bash tests/test_agent.sh                                  # 99 checks, stand-in model, made-up dates
+bash tests/test_agent.sh                                  # 160 checks, stand-in model, made-up dates, stand-in feeds
 uv run agent.py tools                                     # what it can and can't do
 uv run agent.py earnings --direct NVDA AAPL MSFT          # facts only, no model: the baseline
 uv run agent.py earnings "When do NVDA, AAPL and MSFT report?"
@@ -161,9 +161,32 @@ uv run agent.py earnings "When does my watchlist report?"
 
 ## Tested (stand-in model)
 
-`bash tests/test_agent.sh`: 99 checks, all pass (69 before ledger v2). Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
+`bash tests/test_agent.sh`: 160 checks, all pass (99 before the news feeds, 69 before ledger v2). Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
 
 To check the tests themselves, I broke each guard on purpose and re-ran them. Every break was caught. The first time, removing the "on this agent's list" check changed nothing: with one agent, every tool is on its list. That check is now tested directly.
+
+## The news agent (in progress, Nov 8, 2026)
+
+My second agent: a world-news brief, ready before my 4 am start. What happened, why it matters to me, a link.
+
+| Rule | In code |
+|---|---|
+| Paywalls | Never go around them. Only RSS feeds listed in `FEEDS` are fetched: never an article page, never a URL the model sent |
+| Shape first | Title, outlet, time, summary. HTML stripped, hidden characters removed, lengths capped. Full article text in a feed is thrown away |
+| Links | Only on the outlet's own domain; query strings dropped |
+| Fresh and alive | Stories older than 36 h dropped; a feed with nothing newer than 7 days is "stale" |
+| Thin | One outlet only = labelled thin. More outlets rank higher |
+| Interests | `~/vault/me/interests.md`, my words. A couple of big stories from outside them, so it doesn't become an echo |
+| Briefs | Saved under `~/vault/_news/`, which memory search never indexes |
+
+Sources checked live Nov 8: BBC, NPR, Al Jazeera, DW, France 24, The Guardian work. CNN's world feed stopped in Sept 2023. Reuters dropped RSS. NHK World's old feed is gone.
+
+```bash
+uv run news.py feeds       # which feeds work, counts only
+uv run news.py preview     # the ranked stories, no model
+```
+
+Mutation check: 32 guards broken on purpose, 32 caught (23/32 the first time; the survivors added checks and removed one rule that wasn't needed).
 
 ## What the real runs found
 
@@ -189,7 +212,10 @@ The guard checked that every date came from the source. It didn't check how sure
 |---|---|
 | `agent.py` | The agent, tools, guards, ledger |
 | `sidedoor.py` | The side-door test: 7 planted instructions, real model, scored automatically |
-| `tests/test_agent.sh` | 99 checks with a stand-in model and made-up dates, including ledger v2 and whether the monitor reads it |
+| `tests/test_agent.sh` | 160 checks with a stand-in model, made-up dates and stand-in feeds, including ledger v2 and whether the monitor reads it |
+| `news.py` | The news agent's feeds and shaping (Part 1): `feeds` checks every feed, `preview` ranks stories by my interests, no model |
+| `tests/news_checks.py` | 55 checks on the shaping, run by `test_agent.sh` |
+| `tests/news_feeds/` | Stand-in feeds, each broken on purpose: HTML inside, full article text, hidden characters, off-site links, a stale feed, an XML bomb, a web page pretending to be a feed |
 | `tests/mock_agent_ollama.py` | Stand-in model that calls tools in fixed ways (and misbehaves on purpose). `MOCK_OBEY=1` makes it follow every planted instruction |
 | `tests/guard_checks.py` | Direct checks: guards a single read-only agent never reaches, time-of-day conversion, the Yahoo parser fed Apple's real answer, a tool that crashes, undeclared arguments |
 | `tests/ledger_checks.py` | Ledger v2 checks on the ledger the test run wrote |
