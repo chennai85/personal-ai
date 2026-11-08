@@ -27,7 +27,7 @@ An agent I run by hand today and one that runs on a schedule later show up the s
 | `~/vault/values/constitution.md` + `.values/approved.sha256` | Approved and unchanged, or BIG RED FLAG |
 | Vault, agents folder, ledger | Permissions still 700 / 700 / 600 |
 | Ollama `/api/version`, `/api/tags`, `/api/ps` | Up, models installed, models loaded |
-| `tailscale status --json` | Each Mac: online, or when last seen. No addresses |
+| `tailscale status --json` | Each Mac: online, or when last seen. No addresses. Tries PATH, `/usr/local/bin`, `/opt/homebrew/bin`, then the app's own binary; the first that answers wins |
 | `~/vault/.eval/values-*`, `sidedoor-*` | Score line and age. Never the answers |
 | `~/driving-range/scripts/audits/studio_*` | verify.sh pass / warn / fail, and which checks failed |
 
@@ -77,6 +77,7 @@ cd 06-monitor
 bash tests/test_monitor.sh          # stand-ins only; never touches ~/vault
 bash tests/test_server.sh           # the page, the same way
 python3 monitor.py status
+python3 monitor.py tailscale        # where it looks for Tailscale, and what each place answered
 python3 monitor.py serve --dry-run  # where it would listen
 bash install_service.sh             # keep it running (LaunchAgent com.drivingrange.monitor)
 bash install_service.sh status
@@ -92,7 +93,7 @@ Safe to share: the Alerts, Now and Agents sections, and the tickers in Latest.
 
 | File | Checks | Mutations caught |
 |---|---|---|
-| `tests/test_monitor.sh` | 86: rules, privacy, read-only, settings | 30 / 30 |
+| `tests/test_monitor.sh` | 101: rules, privacy, read-only, settings, finding Tailscale | 36 / 36 |
 | `tests/test_server.sh` | 78: addresses, Host names, methods, paths, headers, live rows, half lines, a replaced ledger, limits, read-only, the LaunchAgent file | 18 / 18 |
 
 Stand-ins only: a fake model server that writes down every method it sees, a fake Tailscale, made-up

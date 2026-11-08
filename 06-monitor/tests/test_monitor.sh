@@ -163,10 +163,42 @@ check "20-day-old report: amber"         has "! values test: last run 20 days ag
 
 echo "==> Tailscale"
 OUT="$(TAILSCALE_BIN="$TMP/nope" mon status 2>&1)"
-check "can't read Tailscale: amber"      has "! can't read Tailscale status" "$OUT"
+check "no Tailscale at all: amber"       has "! can't see Tailscale" "$OUT"
 printf '{"BackendState": "Stopped", "Self": {"HostName": "zenstudio"}}' > "$TMP/ts.json"
 check "Tailscale stopped: amber"         has "! Tailscale isn't running" "$(mon status 2>&1)"
 fx tailscale "$TMP/ts.json"
+
+echo "==> Tailscale: several places, the first that answers wins"
+TS="$TMP/ts-places"; mkdir -p "$TS/Tailscale.app/Contents/MacOS"
+printf '#!/bin/bash\necho "failed to connect to local tailscaled; it doesn'"'"'t appear to be running" >&2\nexit 1\n' > "$TS/no-daemon"
+printf '#!/bin/bash\necho "Usage: tailscale [flags] <subcommand>"\n' > "$TS/odd"
+printf '#!/bin/bash\nsleep 30\n' > "$TS/hangs"
+printf '#!/bin/bash\necho "{\\"error\\": \\"not logged in\\"}"\n' > "$TS/other-json"
+printf '#!/bin/bash\ncat "%s"\n' "$TMP/ts.json" > "$TS/good"
+# the app's own binary acts as the command only when told to (TAILSCALE_BE_CLI=1)
+printf '#!/bin/bash\n[ "${TAILSCALE_BE_CLI:-}" = 1 ] || { echo "opened the app instead" >&2; exit 3; }\ncat "%s"\n' "$TMP/ts.json" \
+  > "$TS/Tailscale.app/Contents/MacOS/Tailscale"
+chmod +x "$TS"/* "$TS/Tailscale.app/Contents/MacOS/Tailscale"
+tsrun() { (unset TAILSCALE_BIN; TAILSCALE_TIMEOUT=1 TAILSCALE_CANDIDATES="$1" mon "${@:2}" 2>&1); }
+OUT="$(tsrun "$TS/no-daemon:$TS/other-json:$TS/good" status)"
+check "broken first, good second: used"  has "zengaja        online" "$OUT"
+check "no Tailscale alert then"          hasnt "Tailscale" "$(grep '^  [!✗]' <<<"$OUT")"
+check "the app binary, told to be CLI"   has "zengaja        online" "$(tsrun "$TS/Tailscale.app/Contents/MacOS/Tailscale" status)"
+OUT="$(tsrun "$TS/no-daemon:$TS/odd:$TS/hangs:$TS/nope" status)"
+check "all broken: amber"                has "! can't read Tailscale status" "$OUT"
+check "says why: daemon not running"     has "no-daemon: exit 1: failed to connect to local tailscaled" "$OUT"
+check "says why: not status JSON"        has "odd: not status JSON: Usage: tailscale" "$OUT"
+check "says why: timed out"              has "hangs: timed out" "$OUT"
+check "JSON that isn't status: skipped"  has "other-json: not status JSON" "$(tsrun "$TS/other-json" status)"
+check "points to the diagnosis"          has "python3 monitor.py tailscale" "$OUT"
+OUT="$(tsrun "$TS/no-daemon:$TS/good" tailscale)"; RC=$?
+check "diagnosis: each place, in order"  test "$(grep -c '[✓✗] ' <<<"$OUT")" = 2
+check "diagnosis: which one it uses"     has "Using it. Tailscale is Running" "$OUT"
+check "diagnosis: machines, no addresses" has "zenmaruti" "$OUT"
+check "diagnosis: no addresses"          hasnt "100.64" "$OUT"
+check "diagnosis: exit 0"                test "$RC" = 0
+OUT="$(tsrun "$TS/no-daemon" tailscale)"; RC=$?
+check "diagnosis: none answered, exit 1" test "$RC" = 1 -a -n "$(grep 'None answered' <<<"$OUT")"
 
 echo "==> read-only"
 fingerprint() { find "$VAULT_DIR" "$DR_ROOT" -exec stat -c '%n %a %s %Y' {} + 2>/dev/null \

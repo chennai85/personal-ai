@@ -387,24 +387,72 @@ def check_model_server():
 # ---------------------------------------------------------------------
 # Machines: Tailscale's own view. Names, online, last seen. No addresses.
 # ---------------------------------------------------------------------
-def tailscale_bin():
-    env = os.environ.get("TAILSCALE_BIN")
-    if env:
-        return env
-    app = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-    return shutil.which("tailscale") or (app if Path(app).exists() else None)
+TAILSCALE_PLACES = [                                   # where Tailscale's command lives on a Mac
+    "/usr/local/bin/tailscale",                        # "Install CLI" from the Tailscale menu
+    "/opt/homebrew/bin/tailscale",                     # brew install tailscale
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",   # inside the app itself
+]
+
+
+def tailscale_candidates():
+    if os.environ.get("TAILSCALE_BIN"):                # tests, or a place I name myself
+        return [p for p in [os.environ["TAILSCALE_BIN"]] if Path(p).exists()]
+    places = os.environ.get("TAILSCALE_CANDIDATES", "").split(":") if os.environ.get("TAILSCALE_CANDIDATES") else \
+        [shutil.which("tailscale")] + TAILSCALE_PLACES
+    seen = []
+    for p in places:
+        if p and p not in seen and Path(p).exists():
+            seen.append(p)
+    return seen
+
+
+def first_line(text, width=80):
+    line = next((l.strip() for l in (text or "").splitlines() if l.strip()), "")
+    return line[:width]
+
+
+def tailscale_try(exe):
+    """Run one Tailscale command. Returns (status JSON or None, what happened)."""
+    env = dict(os.environ)
+    if exe.endswith(".app/Contents/MacOS/Tailscale"):
+        env["TAILSCALE_BE_CLI"] = "1"                  # the app's own binary: act as the command, not the app
+    try:
+        out = subprocess.run([exe, "status", "--json"], capture_output=True, text=True, env=env,
+                             timeout=float(os.environ.get("TAILSCALE_TIMEOUT", "10")))
+    except subprocess.TimeoutExpired:
+        return None, "timed out"
+    except OSError as e:
+        return None, f"can't run it ({e.strerror})"
+    try:
+        st = json.loads(out.stdout)
+        if isinstance(st, dict) and "BackendState" in st:
+            return st, "ok"
+    except json.JSONDecodeError:
+        pass
+    if out.returncode:
+        return None, f"exit {out.returncode}: {first_line(out.stderr) or first_line(out.stdout) or 'no message'}"
+    return None, f"not status JSON: {first_line(out.stdout, 60) or first_line(out.stderr, 60) or 'empty'}"
+
+
+def tailscale_attempts():
+    """Try each place in turn; the first that answers wins. Returns (status or None, [(place, what happened)])."""
+    tried = []
+    for exe in tailscale_candidates():
+        st, what = tailscale_try(exe)
+        tried.append((exe, what))
+        if st is not None:
+            return st, tried
+    return None, tried
 
 
 def tailscale_status():
     """Tailscale's own JSON, or (None, why)."""
-    exe = tailscale_bin()
-    if not exe:
+    st, tried = tailscale_attempts()
+    if st is not None:
+        return st, None
+    if not tried:
         return None, "missing"
-    try:
-        out = subprocess.run([exe, "status", "--json"], capture_output=True, text=True, timeout=5)
-        return json.loads(out.stdout), None
-    except Exception as e:
-        return None, type(e).__name__
+    return None, "; ".join(f"{Path(p).name}: {w}" for p, w in tried)
 
 
 def check_machines(now):
@@ -412,7 +460,7 @@ def check_machines(now):
     if why == "missing":
         return [], [alert("amber", "can't see Tailscale", "not installed here, or not on the PATH")]
     if st is None:
-        return [], [alert("amber", "can't read Tailscale status", why)]
+        return [], [alert("amber", "can't read Tailscale status", f"{why} (python3 monitor.py tailscale)")]
     machines, alerts = [], []
     me = st.get("Self") or {}
     if st.get("BackendState") != "Running":
@@ -605,17 +653,36 @@ def describe(e):
     return ""
 
 
+def cmd_tailscale():
+    st, tried = tailscale_attempts()
+    if not tried:
+        print("No Tailscale command found in: " + ", ".join(["PATH"] + TAILSCALE_PLACES))
+        return 1
+    for p, what in tried:
+        print(f"  {'✓' if what == 'ok' else '✗'} {p}\n      {what}")
+    if st is None:
+        print("\nNone answered. Paste the lines above (no addresses in them).")
+        return 1
+    print(f"\nUsing it. Tailscale is {st.get('BackendState')}. Machines:")
+    for m in check_machines(dt.datetime.now())[0]:
+        print(f"  {m['name']:<14} {'online' if m['online'] else 'offline':<8} {m['seen']}")
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(description="Watch my agents. Read-only.")
     sub = p.add_subparsers(dest="cmd", required=True)
     st = sub.add_parser("status", help="alerts, model server, agents, tests")
     st.add_argument("--days", type=int, default=7)
     st.add_argument("--json", action="store_true")
+    sub.add_parser("tailscale", help="where I look for Tailscale, and what each place answered")
     sv = sub.add_parser("serve", help="the web page, on this Mac and over Tailscale only")
     sv.add_argument("--port", type=int, default=8765)
     sv.add_argument("--bind", action="append", help="address to listen on (default: 127.0.0.1 + this Mac's Tailscale address)")
     sv.add_argument("--dry-run", action="store_true", help="say where it would listen, then stop")
     args = p.parse_args()
+    if args.cmd == "tailscale":
+        return cmd_tailscale()
     if args.cmd == "serve":
         import server
         return server.main(args)
