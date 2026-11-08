@@ -29,6 +29,7 @@ A small business is a household with employees, so Phase 2 is the foundation for
 | 3 | [Memory](03-memory/) | A memory layer that belongs to me | ✅ Done: my files and what I tell it, answers with sources in ~2 s, remember and forget. Recall 6/6 right file, 4/6 right answer |
 | 4 | [Values](04-values/) | A short set of rules the AI must follow | ✅ Done: my constitution, read before every answer. Any unapproved change is a BIG RED FLAG and nothing runs. 8/8 temptations held |
 | 5 | [First Agents](05-agents/) | Agents that use tools, each tool guarded in code | 🔨 An earnings-date agent running on the Studio: right dates for 3/3 tickers, 1.4 s. Read-only tools, a ledger of every call, estimates labelled, a side-door test (planted instructions, real model), 99 checks. Ledger v2 (run ids, time zone, declared arguments only). [Why this design](05-agents/WHY-THIS-DESIGN.md) |
+| 6 | [Watching My Agents](06-monitor/) | A read-only page that shows what my agents do, live | ✅ Running on the Studio, open from my other Macs over Tailscale. Reads the logbook, never what I asked. 110 + 82 checks, 79 of 80 deliberate breaks caught. [Why this design](06-monitor/WHY-THIS-DESIGN.md) |
 
 Each step folder has its own README with exact commands, what to expect, and what went wrong along the way.
 
