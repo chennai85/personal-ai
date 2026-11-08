@@ -46,7 +46,8 @@ An agent I run by hand today and one that runs on a schedule later show up the s
 How live works: the page holds one connection open (Server-Sent Events). The server checks the
 ledger once a second and sends each new whole line through the same privacy filter as the terminal
 view. Every 15 s it also sends a fresh snapshot (model server, Tailscale, tests). Ad hoc runs today
-and scheduled runs later look the same.
+and scheduled runs later look the same. The dot in the corner says `live · heard N s ago`; if that
+number climbs past 35, the page is already reconnecting.
 
 | Guard (in code) | Stops |
 |---|---|
@@ -55,7 +56,8 @@ and scheduled runs later look the same.
 | GET only; five fixed addresses; no file names in URLs | Changing anything; reading any other file |
 | Content-Security-Policy: own scripts only, nothing from outside, no framing | Injected scripts; the page loading anything from the internet |
 | Text only, never HTML from data | A ledger value turning into page code |
-| At most 8 live pages; no request log | Running out of threads; keeping a record of who looked |
+| At most 8 live streams: a 9th page takes the oldest's place, never refused; no request log | Running out of threads (phones asleep, closed tabs); keeping a record of who looked |
+| The server pings every 10 s; a page that hears nothing for 35 s, or is refused, reconnects (5 s, 10 s … up to 60 s) | A page that silently stops updating |
 
 ## Alerts
 
@@ -94,7 +96,7 @@ Safe to share: the Alerts, Now and Agents sections, and the tickers in Latest.
 | File | Checks | Mutations caught |
 |---|---|---|
 | `tests/test_monitor.sh` | 110: rules, privacy, read-only, settings, finding Tailscale, ledger v2 | 43 / 43 |
-| `tests/test_server.sh` | 78: addresses, Host names, methods, paths, headers, live rows, half lines, a replaced ledger, limits, read-only, the LaunchAgent file | 18 / 18 |
+| `tests/test_server.sh` | 82: addresses, Host names, methods, paths, headers, live rows, half lines, a replaced ledger, the oldest stream giving way, pings, read-only, the LaunchAgent file | 22 / 23 (the one left changes nothing a page can see) |
 
 Stand-ins only: a fake model server that writes down every method it sees, a fake Tailscale, made-up
 ledgers and reports. Private-looking text is planted on purpose (`SECRET-*`); none of it may reach

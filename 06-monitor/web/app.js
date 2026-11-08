@@ -11,7 +11,9 @@ const TABS = [
 ];
 const DAYS = [1, 7, 30];
 
-const state = { tab: "alerts", days: 7, snap: null, live: false, fresh: new Map(), lastRow: null };
+const state = { tab: "alerts", days: 7, snap: null, live: false, fresh: new Map(), lastRow: null,
+                heard: 0, tries: 0, nextTry: 0 };
+const QUIET_LIMIT = 35000;   // the server pings every 10 s; 35 s of silence means the line is dead
 
 // ---------- tiny DOM helper: text only ----------
 function el(tag, cls, ...kids) {
@@ -37,25 +39,51 @@ function writeHash() {
 }
 
 // ---------- the live connection ----------
+// A browser's EventSource retries a dropped line by itself, but gives up for good if the server
+// ever says no. So the page keeps its own watch: closed, or 35 s of silence → reconnect, waiting
+// a little longer each time (5 s, 10 s … up to 60 s), and fetch a plain snapshot meanwhile.
 let source = null;
 function connect() {
     if (source) source.close();
-    setConn("connecting…", "");
+    setConn(state.snap ? "reconnecting…" : "connecting…", state.snap ? "down" : "");
+    state.heard = Date.now();
     source = new EventSource(`/api/events?days=${state.days}`);
     source.addEventListener("snapshot", (e) => {
         state.snap = JSON.parse(e.data);
-        setConn("live", "live");
+        heard();
         render();
     });
+    source.addEventListener("ping", heard);
     source.addEventListener("row", (e) => {
+        heard();
         const row = JSON.parse(e.data);
         state.fresh.set(key(row), Date.now());
         state.lastRow = Date.now();
         if (state.snap) state.snap.recent = [...state.snap.recent, row];
         render();
     });
-    source.onerror = () => setConn("reconnecting…", "down");   // EventSource retries by itself
+    source.onerror = () => setConn("reconnecting…", "down");
 }
+function heard() {
+    state.heard = Date.now();
+    state.tries = 0;
+    setConn("live", "live");
+}
+function watch() {
+    const dead = !source || source.readyState === EventSource.CLOSED || Date.now() - state.heard > QUIET_LIMIT;
+    if (!dead || Date.now() < state.nextTry) return;
+    state.tries += 1;
+    state.nextTry = Date.now() + Math.min(60000, 5000 * state.tries);
+    fetch(`/api/snapshot?days=${state.days}`, { cache: "no-store" })
+        .then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) { state.snap = s; render(); } })
+        .catch(() => {});
+    connect();
+}
+setInterval(watch, 1000);
+document.addEventListener("visibilitychange", () => {   // a phone waking up: check at once
+    if (document.visibilityState === "visible") { state.nextTry = 0; watch(); }
+});
 function setConn(text, cls) {
     state.live = cls === "live";
     $("conn").className = "conn " + cls;
@@ -85,6 +113,7 @@ function renderHeader() {
         return b;
     }));
     $("updated").textContent = state.snap ? `updated ${state.snap.time.slice(11)}` : "";
+    if (state.live) $("conn-text").textContent = `live · heard ${Math.round((Date.now() - state.heard) / 1000)} s ago`;
 }
 
 // ---------- tabs ----------
@@ -224,6 +253,7 @@ setInterval(() => {
     let changed = false;
     for (const [k, t] of state.fresh) if (t < cut) { state.fresh.delete(k); changed = true; }
     if (changed || state.tab === "live") render();
+    else renderHeader();
 }, 1000);
 
 window.addEventListener("hashchange", () => {   // links and the back button

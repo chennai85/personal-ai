@@ -15,6 +15,8 @@ Rules (in code):
      privacy rules as the terminal view. The page builds text only, never HTML from data.
   5. Live: /api/events tails the ledger once a second and sends each new row as it lands.
      The agents don't know the page exists. Read-only, like the rest of the monitor.
+  6. A live page is never refused (a refused browser gives up for good): past 8, the oldest
+     stream ends. Every 10 s the server says "ping"; a page that hears nothing for 35 s reconnects.
 """
 
 import ipaddress
@@ -35,7 +37,8 @@ FILES = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
 }
-MAX_STREAMS = 8                                              # open pages at once (phones, Macs, tabs)
+MAX_STREAMS = 8                                              # open pages at once; a 9th takes the oldest's place
+PING_EVERY = float(os.environ.get("MONITOR_PING_EVERY", "10"))   # the page reconnects if it hears nothing for 35 s
 TICK = float(os.environ.get("MONITOR_TICK", "1"))           # how often the ledger is checked, seconds
 SNAPSHOT_EVERY = float(os.environ.get("MONITOR_SNAPSHOT_EVERY", "15"))   # model server, Tailscale, tests
 CACHE_SECONDS = 5                                            # many pages share one snapshot
@@ -76,7 +79,7 @@ class State:
     def __init__(self):
         self.lock = threading.Lock()
         self.hosts = {"localhost", "127.0.0.1"}
-        self.streams = 0
+        self.streams = []                                    # one stop flag per open live page, oldest first
         self.cache = {}
 
     def snapshot(self, days):
@@ -165,34 +168,35 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def stream(self, days):
+        # Never refuse a live page: a browser that's refused gives up for good. Instead the oldest
+        # page's stream ends (a phone asleep in a drawer, a tab closed without saying so), and if
+        # it's still open, it reconnects by itself.
+        stop = threading.Event()
         with STATE.lock:
-            if STATE.streams >= MAX_STREAMS:
-                busy = True
-            else:
-                busy, STATE.streams = False, STATE.streams + 1
-        if busy:
-            return self.plain(503, f"{MAX_STREAMS} pages are open already. Close one.")
+            while len(STATE.streams) >= MAX_STREAMS:
+                STATE.streams.pop(0).set()
+            STATE.streams.append(stop)
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             for k, v in HEADERS.items():
                 self.send_header(k, v)
             self.end_headers()
-            self.tail(days)
+            self.tail(days, stop)
         except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
             pass                                             # the page was closed
         finally:
             with STATE.lock:
-                STATE.streams -= 1
+                if stop in STATE.streams:
+                    STATE.streams.remove(stop)
 
-    def tail(self, days):
+    def tail(self, days, stop):
         """Send a snapshot, then every new ledger row as it lands, and a fresh snapshot now and then."""
         opened = monitor.dt.datetime.now() - monitor.dt.timedelta(seconds=2)   # the ledger keeps whole seconds
         ino, offset = self.where()
         self.event("snapshot", STATE.snapshot(days))
-        next_snap, next_ping = time.monotonic() + SNAPSHOT_EVERY, time.monotonic() + 15
-        while True:
-            time.sleep(TICK)
+        next_snap, next_ping = time.monotonic() + SNAPSHOT_EVERY, time.monotonic() + PING_EVERY
+        while not stop.wait(TICK):
             now_ino, size = self.where()
             if now_ino != ino or size < offset:              # a new or replaced ledger: read it from the top
                 ino, offset = now_ino, 0
@@ -210,11 +214,10 @@ class Handler(BaseHTTPRequestHandler):
                     STATE.cache.pop(days, None)
                 self.event("snapshot", STATE.snapshot(days))
                 next_snap = time.monotonic() + SNAPSHOT_EVERY
-                next_ping = time.monotonic() + 15
+                next_ping = time.monotonic() + PING_EVERY
             elif time.monotonic() >= next_ping:
-                self.wfile.write(b": ping\n\n")              # keeps phones and proxies from hanging up
-                self.wfile.flush()
-                next_ping = time.monotonic() + 15
+                self.event("ping", {})                       # the page counts on hearing something
+                next_ping = time.monotonic() + PING_EVERY
 
     @staticmethod
     def where():

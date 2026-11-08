@@ -14,7 +14,7 @@ TMP="$(mktemp -d)"
 PORT=11994; WEB=11993
 export VAULT_DIR="$TMP/vault" DR_ROOT="$TMP/dr" DR_PROFILE="studio"
 export MODEL_BASE_URL="http://127.0.0.1:$PORT" TAILSCALE_BIN="$TMP/tailscale"
-export MONITOR_TICK=0.2 MONITOR_SNAPSHOT_EVERY=2
+export MONITOR_TICK=0.2 MONITOR_SNAPSHOT_EVERY=2 MONITOR_PING_EVERY=0.7
 PASS=0; FAIL=0
 check() {
   local name="$1"; shift
@@ -146,18 +146,25 @@ check "keeps going, reads the new one" has '"agent": "life_admin", "event": "que
 check "older rows not replayed"        hasnt '"chars": 777' "$ROWS2"
 check "server still up"                test "$(code "$U/")" = 200
 
-echo "==> limits"
-PIDS=""
-for _ in 1 2 3 4 5 6 7 8; do curl -sN --max-time 4 "$U/api/events" >/dev/null & PIDS="$PIDS $!"; done
-sleep 1
-check "9th live page refused (503)"    test "$(code --max-time 2 "$U/api/events")" = 503
-check "snapshot still served"          test "$(code "$U/api/snapshot")" = 200
-wait $PIDS 2>/dev/null
+echo "==> limits: a live page is never refused; past 8, the oldest stream ends"
+for i in 1 2 3 4 5 6 7 8; do
+  curl -sN --max-time 8 "$U/api/events" > "$TMP/page$i.txt" 2>/dev/null &
+  eval "P$i=\$!"; sleep 0.15
+done
 sleep 0.5
-check "slots free again"               test "$(curl -s --max-time 1 -o /dev/null -w '%{http_code}' "$U/api/events")" = 200
+NINTH="$(curl -sN --max-time 2 "$U/api/events" 2>/dev/null)"
+check "9th page served, not refused"   has "event: snapshot" "$NINTH"
+sleep 0.5
+check "the oldest stream ended"        bash -c "! kill -0 $P1 2>/dev/null"
+check "the newer ones still open"      kill -0 "$P8"
+check "snapshot still served"          test "$(code "$U/api/snapshot")" = 200
+wait $P2 $P3 $P4 $P5 $P6 $P7 $P8 2>/dev/null   # not "wait": that waits for the server too
+check "pings when there's nothing new" has "event: ping" "$(curl -sN --max-time 2 "$U/api/events")"
+check "the page reconnects on silence" grep -q "QUIET_LIMIT" "$HERE/web/app.js"
+check "the page retries after a refusal" grep -q "EventSource.CLOSED" "$HERE/web/app.js"
 
 echo "==> read-only, watched by Python's audit hook"
-WATCH="$(python3 - "$HERE" "$((WEB+10))" <<'EOF' 2>&1
+WATCH="$(MONITOR_PING_EVERY=100 python3 - "$HERE" "$((WEB+10))" <<'EOF' 2>&1
 import sys, threading, time, urllib.request
 sys.path.insert(0, sys.argv[1]); port = int(sys.argv[2])
 import monitor, server
