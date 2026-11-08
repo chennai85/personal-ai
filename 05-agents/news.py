@@ -1,12 +1,13 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["numpy>=1.26", "pypdf>=4.0", "python-docx>=1.1", "fonttools>=4.40"]
+# dependencies = ["numpy>=1.26", "pypdf>=4.0", "python-docx>=1.1", "fonttools>=4.40", "yfinance>=1.7,<2"]
 # ///
 """
 news.py: the news agent's feeds and shaping, on the Mac Studio.
 
     uv run news.py feeds            check every feed: works, stale, failed (counts only)
     uv run news.py preview          the stories the brief would start from, ranked by my interests (no model)
+    uv run news.py names            my watchlist's company names (from Yahoo, saved, refreshed weekly)
 
 Rules (in code):
   1. Only the feeds in FEEDS are ever fetched. Never an article page, never a URL from the model.
@@ -18,6 +19,10 @@ Rules (in code):
   5. Old stories are dropped (FRESH_HOURS). A feed whose newest story is older than STALE_DAYS is
      "stale": it looks alive but isn't (CNN's world feed stopped in Sept 2023).
   6. The same event from several outlets is grouped. One outlet only = "thin".
+  7. Each feed gives at most FEED_MAX stories (its freshest). India-only stories: at most INDIA_MAX
+     per brief, unless a story is about my watchlist.
+  8. Watchlist: read with the earnings agent's own rule (ticker lines only). Company names come from
+     Yahoo, cleaned like any outside text, saved under ~/vault/_news/, refreshed weekly.
 
 Interests come from ~/vault/me/interests.md (my words). Briefs are saved under ~/vault/_news/,
 which memory.py ingest skips, so outside text never reaches memory search.
@@ -53,6 +58,10 @@ TITLE_MAX = 200
 SUMMARY_MAX = 400
 BRIEF_SIZE = 12         # stories in a brief
 SURPRISE_DEFAULT = 2    # big stories outside my interests, unless interests.md says otherwise
+FEED_MAX = 20           # stories per feed (its freshest), so one busy feed can't crowd the rest
+INDIA_MAX = 1           # India-only stories per brief (Sri, Nov 8); watchlist stories always get through
+NAMES = BRIEFS / "names.json"
+NAMES_DAYS = 7          # company names refreshed weekly
 FETCH_WORKERS = 6
 TIMEOUT = 15
 USER_AGENT = "personal-ai-news/1.0 (one person's morning brief; reads RSS only)"
@@ -63,7 +72,7 @@ FEEDS = {
     "bbc":          {"outlet": "BBC", "url": "https://feeds.bbci.co.uk/news/world/rss.xml", "domains": ("bbc.co.uk", "bbc.com"), "use": True},
     "bbc-biz":      {"outlet": "BBC", "url": "https://feeds.bbci.co.uk/news/business/rss.xml", "domains": ("bbc.co.uk", "bbc.com"), "use": True},
     "bbc-tech":     {"outlet": "BBC", "url": "https://feeds.bbci.co.uk/news/technology/rss.xml", "domains": ("bbc.co.uk", "bbc.com"), "use": True},
-    "bbc-india":    {"outlet": "BBC", "url": "https://feeds.bbci.co.uk/news/world/asia/india/rss.xml", "domains": ("bbc.co.uk", "bbc.com"), "use": True},
+    "bbc-india":    {"outlet": "BBC", "url": "https://feeds.bbci.co.uk/news/world/asia/india/rss.xml", "domains": ("bbc.co.uk", "bbc.com"), "use": True, "region": "india"},
     "npr":          {"outlet": "NPR", "url": "https://feeds.npr.org/1004/rss.xml", "domains": ("npr.org",), "use": True},
     "npr-biz":      {"outlet": "NPR", "url": "https://feeds.npr.org/1006/rss.xml", "domains": ("npr.org",), "use": True},
     "npr-tech":     {"outlet": "NPR", "url": "https://feeds.npr.org/1019/rss.xml", "domains": ("npr.org",), "use": True},
@@ -77,21 +86,19 @@ FEEDS = {
     "cbs":          {"outlet": "CBS News", "url": "https://www.cbsnews.com/latest/rss/main", "domains": ("cbsnews.com",), "use": True},
     "cbs-us":       {"outlet": "CBS News", "url": "https://www.cbsnews.com/latest/rss/us", "domains": ("cbsnews.com",), "use": True},
     "latimes":      {"outlet": "Los Angeles Times", "url": "https://www.latimes.com/world-nation/rss2.0.xml", "domains": ("latimes.com",), "use": True, "paywall": True},
-    "hindu":        {"outlet": "The Hindu", "url": "https://www.thehindu.com/news/national/feeder/default.rss", "domains": ("thehindu.com",), "use": True, "paywall": True},
-    "ndtv":         {"outlet": "NDTV", "url": "https://feeds.feedburner.com/ndtvnews-top-stories", "domains": ("ndtv.com",), "use": True},
-    "indianexp":    {"outlet": "Indian Express", "url": "https://indianexpress.com/section/india/feed/", "domains": ("indianexpress.com",), "use": True},
-    # Al Jazeera removed Nov 8 (Sri's choice).
-    # Not read yet. `feeds` checks them on the Studio; turn one on by setting "use": True.
-    "gdn-tech":      {"outlet": "The Guardian", "url": "https://www.theguardian.com/technology/rss", "domains": ("theguardian.com",), "use": False},
-    "guardian-biz":  {"outlet": "The Guardian", "url": "https://www.theguardian.com/business/rss", "domains": ("theguardian.com",), "use": False},
+    "hindu":        {"outlet": "The Hindu", "url": "https://www.thehindu.com/news/national/feeder/default.rss", "domains": ("thehindu.com",), "use": True, "paywall": True, "region": "india"},
+    "ndtv":         {"outlet": "NDTV", "url": "https://feeds.feedburner.com/ndtvnews-top-stories", "domains": ("ndtv.com",), "use": True, "region": "india"},
+    "indianexp":    {"outlet": "Indian Express", "url": "https://indianexpress.com/section/india/feed/", "domains": ("indianexpress.com",), "use": True, "region": "india"},
+    "gdn-tech":     {"outlet": "The Guardian", "url": "https://www.theguardian.com/technology/rss", "domains": ("theguardian.com",), "use": True},
+    "guardian-biz": {"outlet": "The Guardian", "url": "https://www.theguardian.com/business/rss", "domains": ("theguardian.com",), "use": True},
+    "slashdot":     {"outlet": "Slashdot", "url": "https://rss.slashdot.org/Slashdot/slashdotMain", "domains": ("slashdot.org",), "use": True},
+    # Al Jazeera removed Nov 8 (Sri's choice). WSJ, CNN (stale for years) and The Economist (weekly) deleted.
+    # These work from the Studio (Nov 8) but aren't wanted for now: paywalled (NYT, FT) or more India (TOI).
+    # `feeds` still checks them; turn one on by setting "use": True.
     "nyt":          {"outlet": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", "domains": ("nytimes.com",), "use": False, "paywall": True},
-    # WSJ: stale (newest item Jan 2025). NYT and Times of India: the browser pane won't open them; `feeds` checks them.
-    "wsj":          {"outlet": "Wall Street Journal", "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml", "domains": ("wsj.com",), "use": False, "paywall": True},
     "nyt-us":       {"outlet": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/US.xml", "domains": ("nytimes.com",), "use": False, "paywall": True},
-    "toi":          {"outlet": "Times of India", "url": "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms", "domains": ("indiatimes.com",), "use": False},
     "ft":           {"outlet": "Financial Times", "url": "https://www.ft.com/world?format=rss", "domains": ("ft.com",), "use": False, "paywall": True},
-    "economist":    {"outlet": "The Economist", "url": "https://www.economist.com/international/rss.xml", "domains": ("economist.com",), "use": False, "paywall": True},
-    "cnn":          {"outlet": "CNN", "url": "http://rss.cnn.com/rss/edition_world.rss", "domains": ("cnn.com",), "use": False},
+    "toi":          {"outlet": "Times of India", "url": "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms", "domains": ("indiatimes.com",), "use": False, "region": "india"},
 }
 
 
@@ -131,7 +138,10 @@ def fetch(name):
 # Shaping: what's left of a story after this is all anything downstream ever sees
 # ---------------------------------------------------------------------
 TAG = re.compile(r"<[^>]*>")
-DROP_BLOCKS = re.compile(r"<(script|style)\b.*?</\1\s*>", re.I | re.S)
+# Feed boilerplate that would only waste the model's attention (checked against real feeds, Nov 8).
+BOILERPLATE = re.compile(r"\s*(Read\s+more\s+of\s+this\s+story\s+at\s+Slashdot\.?|Continue\s+reading\s*(\.\.\.|…)?)\s*", re.I)
+# Blocks a reader never sees as text: their contents go too (hidden text is where a planted instruction hides).
+DROP_BLOCKS = re.compile(r"<(script|style|iframe|noscript|object|template|svg)\b.*?</\1\s*>", re.I | re.S)
 
 
 def clean_text(s, limit):
@@ -147,6 +157,7 @@ def clean_text(s, limit):
     # Control and format characters (zero-width, right-to-left overrides, ...) go: text you can't see
     # is text the model would read and I wouldn't.
     s = "".join(" " if unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") else c for c in s)
+    s = BOILERPLATE.sub(" ", s)
     s = re.sub(r"\s+", " ", s).strip()
     if len(s) > limit:
         cut = s[:limit - 1]
@@ -237,8 +248,8 @@ def read_feed(name, now=None):
     """One feed → {"feed", "ok", "stale", "stories", "dropped", "error"}. Never raises."""
     now = now or now_utc()
     feed = FEEDS[name]
-    res = {"feed": name, "ok": False, "stale": False, "stories": [], "seen": 0, "dropped": 0, "error": None,
-           "newest_hours": None}
+    res = {"feed": name, "ok": False, "stale": False, "stories": [], "seen": 0, "dropped": 0, "capped": 0,
+           "error": None, "newest_hours": None}
     try:
         raw = parse_feed(fetch(name))
     except Exception as e:                 # the error's type only: its message is outside text
@@ -260,12 +271,16 @@ def read_feed(name, now=None):
         res["stories"].append({"feed": name, "outlet": feed["outlet"], "title": title,
                                "summary": clean_text(it["summary"], SUMMARY_MAX), "link": link,
                                "time": t.astimezone(dt.timezone.utc).isoformat(timespec="minutes"),
-                               "paywall": bool(feed.get("paywall"))})
+                               "paywall": bool(feed.get("paywall")), "india": feed.get("region") == "india"})
+    res["stories"].sort(key=lambda s: s["time"], reverse=True)
+    res["capped"] = max(0, len(res["stories"]) - FEED_MAX)
+    res["stories"] = res["stories"][:FEED_MAX]
     if newest is not None:
         res["newest_hours"] = round((now - newest).total_seconds() / 3600, 1)
     if newest is None or now - newest > dt.timedelta(days=STALE_DAYS):
         res["stale"] = True
-        res["dropped"] += len(res["stories"])
+        res["dropped"] += len(res["stories"]) + res["capped"]
+        res["capped"] = 0
         res["stories"] = []
     return res
 
@@ -331,13 +346,14 @@ def gather(names=None, now=None):
 # ---------------------------------------------------------------------
 # Interests: ~/vault/me/interests.md, my words
 # ---------------------------------------------------------------------
-KEYS = {"follow closely": "close", "sometimes": "some", "never show me": "never", "surprise me with": "surprise"}
+KEYS = {"follow closely": "close", "sometimes": "some", "never show me": "never", "surprise me with": "surprise",
+        "travel": "travel"}
 
 
 def read_interests(path=None):
-    """→ {"close": [terms], "some": [terms], "never": [terms], "surprise": int, "found": bool}"""
+    """→ {"close", "some", "never", "travel": [terms], "surprise": int, "found": bool}"""
     path = Path(path or INTERESTS)
-    out = {"close": [], "some": [], "never": [], "surprise": SURPRISE_DEFAULT, "found": path.is_file()}
+    out = {"close": [], "some": [], "never": [], "travel": [], "surprise": SURPRISE_DEFAULT, "found": path.is_file()}
     if not out["found"]:
         return out
     for line in path.read_text().splitlines():
@@ -365,26 +381,132 @@ def matches(terms, text):
     return [t for t in terms if re.search(r"(?<![A-Za-z0-9])" + re.escape(t) + r"(?:s|es)?(?![A-Za-z0-9])", text, re.I)]
 
 
-def rank(groups, interests, size=BRIEF_SIZE):
-    """My interests first (follow closely counts double), more outlets higher, 'never' gone,
-    and a few big stories from outside my interests so the brief doesn't become an echo."""
+def watch_hits(watch, text):
+    """Watchlist tickers whose company is in the text: by name (any case), or by the ticker itself
+    written in capitals when it has 3+ letters ("AMD shares", never "MU" or "ON")."""
+    hits = []
+    for ticker, name in (watch or {}).items():
+        if (name and matches([name], text)) or (len(ticker) >= 3 and
+                re.search(r"(?<![A-Za-z0-9])\$?" + re.escape(ticker) + r"(?![A-Za-z0-9])", text)):
+            hits.append(ticker)
+    return hits
+
+
+def india_only(g):
+    return all(s.get("india") for s in g["members"])
+
+
+def cap_india(groups, room):
+    """Keep at most `room` India-only stories; watchlist stories always get through."""
+    out = []
+    for g in groups:
+        if india_only(g) and not g.get("watch"):
+            if room <= 0:
+                continue
+            room -= 1
+        out.append(g)
+    return out, room
+
+
+def rank(groups, interests, size=BRIEF_SIZE, watch=None):
+    """My watchlist first (counts 3), then interests (follow closely and travel count 2, sometimes 1),
+    more outlets higher, 'never' gone, India kept small, and a few big stories from outside my
+    interests so the brief doesn't become an echo."""
     picked, outside = [], []
     for g in groups:
         text = " ".join(f"{s['title']} {s['summary']}" for s in g["members"])
         if matches(interests["never"], text):
             continue
         close, some = matches(interests["close"], text), matches(interests["some"], text)
-        g = {**g, "matched": close + some, "score": 2 * len(close) + len(some)}
+        travel, hits = matches(interests["travel"], text), watch_hits(watch, text)
+        g = {**g, "matched": close + some + travel, "travel": travel, "watch": hits,
+             "score": 3 * len(hits) + 2 * (len(close) + len(travel)) + len(some)}
         (picked if g["score"] else outside).append(g)
     key = lambda g: (g["score"], len(g["outlets"]), g["lead"]["time"])
     picked.sort(key=key, reverse=True)
     outside = [g for g in outside if len(g["outlets"]) >= 2]      # a surprise must be a big story
     outside.sort(key=lambda g: (len(g["outlets"]), g["lead"]["time"]), reverse=True)
+    picked, room = cap_india(picked, INDIA_MAX)
+    outside, _ = cap_india(outside, room)
     n_out = min(interests["surprise"], len(outside), size)
     chosen = picked[:size - n_out] + [{**g, "surprise": True} for g in outside[:n_out]]
     for i, g in enumerate(chosen, 1):
         g["id"] = f"s{i}"
     return chosen
+
+
+# ---------------------------------------------------------------------
+# Watchlist names: Yahoo says "Broadcom Inc." for AVGO; news says "Broadcom"
+# ---------------------------------------------------------------------
+NAME_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 &.'-]{1,39}$")
+SUFFIX = re.compile(r"(,?\s+(inc|incorporated|corp|corporation|co|company|holdings|group|ltd|limited|plc|"
+                    r"n\.?v|s\.?a|ag|se|platforms|class [a-c]|common stock|ordinary shares|adr)\.?)$", re.I)
+
+
+def short_name(raw):
+    """Outside text, so cleaned like a headline, then the company suffixes trimmed. None if odd."""
+    name = clean_text(raw or "", 80)
+    while True:
+        cut = SUFFIX.sub("", name).strip(" ,.")
+        if cut == name:
+            break
+        name = cut
+    return name if NAME_OK.match(name) else None
+
+
+def fetch_name(ticker):
+    """Yahoo's short name for a ticker. NEWS_NAMES_FAKE=file.json stands in for Yahoo in tests."""
+    fake = os.environ.get("NEWS_NAMES_FAKE")
+    if fake:
+        data = json.loads(Path(fake).read_text())
+        if ticker not in data:
+            raise LookupError("unknown ticker")
+        return data[ticker]
+    import yfinance as yf   # same library and same tickers the earnings agent already uses
+    t = yf.Ticker(ticker.replace(".", "-"))
+    try:
+        price = t._quote._fetch(["price"])["quoteSummary"]["result"][0]["price"]
+        return price.get("shortName") or price.get("longName")
+    except (AttributeError, KeyError, IndexError, TypeError):
+        info = t.info or {}
+        return info.get("shortName") or info.get("longName")
+
+
+def read_watchlist():
+    """The earnings agent's own rule: a line counts only if every word on it is a ticker."""
+    sys.path.insert(0, str(HERE))
+    import agent      # loaded here, not at the top: agent.py will import news.py
+    return agent.tool_read_watchlist()["tickers"]
+
+
+def watch_names(today=None, refresh=False):
+    """→ {ticker: name or None}. Saved in ~/vault/_news/names.json (600); a name older than
+    NAMES_DAYS is fetched again. A failed fetch keeps the old name."""
+    today = today or now_utc().date()
+    tickers = read_watchlist()
+    try:
+        saved = json.loads(NAMES.read_text()) if NAMES.is_file() else {}
+    except (ValueError, OSError):
+        saved = {}
+    stale = [t for t in tickers if refresh or t not in saved or
+             (today - dt.date.fromisoformat(saved[t].get("fetched", "2000-01-01"))).days >= NAMES_DAYS]
+
+    def one(t):
+        try:
+            return t, short_name(fetch_name(t))
+        except Exception:
+            return t, (saved.get(t) or {}).get("name")
+    if stale:
+        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+            for t, name in pool.map(one, stale):
+                saved[t] = {"name": name, "fetched": today.isoformat()}
+        BRIEFS.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(BRIEFS, 0o700)
+        tmp = NAMES.with_suffix(".tmp")
+        tmp.write_text(json.dumps({t: saved[t] for t in tickers}, indent=1))
+        os.chmod(tmp, 0o600)
+        tmp.replace(NAMES)
+    return {t: (saved.get(t) or {}).get("name") for t in tickers}
 
 
 # ---------------------------------------------------------------------
@@ -421,19 +543,31 @@ def cmd_preview(args):
     interests = read_interests()
     if not interests["found"]:
         print(f"NOTE  no interests file at {INTERESTS}: every story counts as outside my interests.")
-    chosen = rank(got["groups"], interests)
+    watch = watch_names()
+    chosen = rank(got["groups"], interests, watch=watch)
     for g in chosen:
         lead = g["lead"]
-        tag = "surprise" if g.get("surprise") else ", ".join(g["matched"])
+        tag = "surprise" if g.get("surprise") else ", ".join(g["watch"] + g["matched"])
         print(f"[{g['id']}] {lead['title']}")
         print(f"      {' · '.join(g['outlets'])}{'  (thin: one outlet)' if g['thin'] else ''}  [{tag}]")
         for s in g["members"]:
             print(f"      {s['outlet']}: {s['link']}")
     ok = sum(f["ok"] and not f["stale"] for f in got["feeds"])
     print(f"\n{ok}/{len(got['feeds'])} feeds · {sum(len(g['members']) for g in got['groups'])} fresh stories "
-          f"· {len(got['groups'])} events · {len(chosen)} chosen")
+          f"· {len(got['groups'])} events · {len(chosen)} chosen · "
+          f"{sum(bool(g['watch']) for g in chosen)} watchlist · {sum(india_only(g) for g in chosen)} India")
     if args.json:
         print(json.dumps(chosen, indent=1))
+
+
+def cmd_names(args):
+    """Ticker → the name the brief looks for. My terminal only."""
+    names = watch_names(refresh=args.refresh)
+    if not names:
+        print("No tickers in the watchlist.")
+    for t, n in names.items():
+        print(f"{t:<8}{n or '(no name: matched by ticker only)'}")
+    return 0
 
 
 def main():
@@ -445,6 +579,9 @@ def main():
     pr = sub.add_parser("preview", help="the ranked stories, no model")
     pr.add_argument("--json", action="store_true")
     pr.set_defaults(f=cmd_preview)
+    nm = sub.add_parser("names", help="my watchlist's company names")
+    nm.add_argument("--refresh", action="store_true", help="fetch every name again now")
+    nm.set_defaults(f=cmd_names)
     a = p.parse_args()
     sys.exit(a.f(a) or 0)
 

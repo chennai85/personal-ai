@@ -202,7 +202,8 @@ check "report has no planted text"            bash -c "! grep -qE 'accountant@|S
 check "my real watchlist untouched"           test "$(cat "$VAULT_DIR/trading/watchlist.md")" = "$(cat "$TMP/side-door.md")"
 
 echo "==> news: feeds and shaping (stand-in feeds, pinned clock)"
-export NEWS_FAKE="$TMP/news_feeds" NEWS_NOW="2026-11-08T12:00:00+00:00"
+export NEWS_FAKE="$TMP/news_feeds" NEWS_NOW="2026-11-08T12:00:00+00:00" NEWS_NAMES_FAKE="$TMP/names_none.json"
+echo "{}" > "$NEWS_NAMES_FAKE"
 cp -r "$HERE/tests/news_feeds" "$NEWS_FAKE"
 OUT="$(cd "$HERE" && uv run --quiet --with numpy --with pypdf --with python-docx --with fonttools \
        python3 tests/news_checks.py 2>&1)"
@@ -221,7 +222,7 @@ check "news preview: nothing secret"   hasnt "SECRET-" "$OUT"
 OUT="$(news feeds evil 2>&1)"; RC=$?
 check "news feeds: unknown name refused" bash -c "[ $RC != 0 ] && grep -q 'no feed called' <<<\"\$1\"" _ "$OUT"
 check "news: nothing written to the ledger" bash -c "! grep -q '\"agent\": \"news\"' '$L'"
-unset NEWS_FAKE NEWS_NOW
+unset NEWS_FAKE NEWS_NOW NEWS_NAMES_FAKE
 
 echo "==> step 4 still guards the agent"
 chmod u+w "$VAULT_DIR/values/constitution.md"
