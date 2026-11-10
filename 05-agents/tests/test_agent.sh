@@ -234,6 +234,70 @@ if [ -f "$HERE/../06-monitor/monitor.py" ]; then
   check "monitor: still nothing unknown"  hasnt "(unknown)" "$MON"
   check "monitor: no headlines reach it"  bash -c "! grep -qi 'ceasefire\|nvidia shares\|SECRET-' <<<\"\$1\"" _ "$MON"
 fi
+echo "==> news agent: the model writes, the code checks (stand-in model)"
+echo '{"NVDA": "NVIDIA Corporation", "AVGO": "Broadcom Inc."}' > "$NEWS_NAMES_FAKE"
+rm -f "$VAULT_DIR/_news/names.json"
+printf -- "- Follow closely: AI, Nvidia\n- Sometimes: golf, chip, Python\n- Never show me: celebrity, snake, python?\n- Travel: airline strike\n" > "$VAULT_DIR/me/interests.md"
+lastrun() { python3 -c "
+import json,sys
+rows=[json.loads(l) for l in open(sys.argv[1])]
+run=[r for r in rows if r['agent']=='news' and r['event']=='question'][-1]['run']
+print(json.dumps([r for r in rows if r.get('run')==run]))" "$L"; }
+rm -rf "$VAULT_DIR/_news/briefs"              # the unit checks wrote one; this run must write its own
+OUT="$(agent news 2>&1)"; RC=$?
+check "news: runs"                         test "$RC" = 0
+check "news: three sections"               bash -c "grep -q '^## Rising' <<<\"\$1\" && grep -q '^## Your watchlist' <<<\"\$1\" && grep -q '^## Worth knowing' <<<\"\$1\"" _ "$OUT"
+check "news: links printed by the code"    has "https://www.bbc.co.uk/news/business-nvidia" "$OUT"
+check "news: the model never saw a link"   hasnt "LINKS-SEEN" "$OUT"
+check "news: python? judged by meaning"    bash -c "grep -q 'Python 3.15' <<<\"\$1\" && ! grep -qi 'zoo\|GARBLE' <<<\"\$1\"" _ "$OUT"
+check "news: clean run, nothing removed"   has "every line cites a real story" "$OUT"
+B="$(ls "$VAULT_DIR/_news/briefs/"*.md 2>/dev/null | tail -1)"
+check "news: brief saved, 600"             bash -c "[ -f '$B' ] && [ \"\$(stat -c %a '$B' 2>/dev/null || stat -f %Lp '$B')\" = 600 ] && grep -q 'Python 3.15' '$B'"
+R="$(lastrun)"
+check "news: logbook question, 2 tools, answer" python3 -c "
+import json,sys
+r=json.loads(sys.argv[1]); ev=[x['event'] for x in r]
+assert ev==['question','tool','tool','answer'], ev
+assert sorted(x['tool'] for x in r if x['event']=='tool')==['news_today','read_interests']
+assert all(x['args']=={} and x['ok'] for x in r if x['event']=='tool')
+a=r[-1]; assert a['items']>0 and a['advice']==0 and a['unverified']==0 and a['judged']==3 and a['judged_out']==2, a" "$R"
+check "news: logbook holds no headlines or links" bash -c "! grep -qi 'nvidia shares\|ceasefire\|https://' '$L'"
+
+OUT="$(agent news MAKE_UP_ID ADD_URL ADVICE ECHO NO_IDS TOO_MANY 2>&1)"
+check "news: made-up story id removed"     hasnt "nobody published" "$OUT"
+check "news: link from the model removed"  hasnt "evil.example" "$OUT"
+check "news: advice removed"               hasnt "buy NVDA" "$OUT"
+check "news: constitution text removed"    python3 -c "
+import re,sys
+c=open(sys.argv[1]).read().lower(); o=sys.argv[2].lower()
+w=re.findall(r\"[a-z']+\", o)
+assert not any(' '.join(w[i:i+8]) in ' '.join(re.findall(r\"[a-z']+\", c)) for i in range(len(w)-7))" "$VAULT_DIR/values/constitution.md" "$OUT"
+check "news: removals counted on the brief" bash -c "grep -q '1 unknown id' <<<\"\$1\" && grep -q '1 link' <<<\"\$1\" && grep -q '1 advice' <<<\"\$1\" && grep -q '1 constitution' <<<\"\$1\"" _ "$OUT"
+check "news: at most 12 items"             test "$(grep -c '^- ' <<<"$OUT")" -le 12
+R="$(lastrun)"
+check "news: removals counted in the logbook" python3 -c "
+import json,sys
+a=json.loads(sys.argv[1])[-1]
+assert a['advice']==1 and a['constitution']==1 and a['links']==1 and a['unverified']==2, a" "$R"
+
+OUT="$(agent news NO_TOOL 2>&1)"
+check "news: no tool called = flagged"     has "didn't read the news" "$OUT"
+check "news: and counted unverified"       python3 -c "import json,sys; a=json.loads(sys.argv[1])[-1]; assert a['unverified']>=1 and a['items']==0, a" "$(lastrun)"
+OUT="$(agent news LOOP 2>&1)"
+check "news: another agent's tool blocked" python3 -c "import json,sys; r=json.loads(sys.argv[1]); assert any(x['event']=='blocked' and x['reason']==\"not on this agent's list\" for x in r), r" "$(lastrun)"
+OUT="$(cd "$HERE" && MODEL_BASE_URL="http://127.0.0.1:1" uv run --quiet agent.py news 2>&1)"; RC=$?
+check "news: model down = stop, error row" bash -c "[ $RC != 0 ] && tail -1 '$L' | grep -q '\"event\": \"error\"'"
+OUT="$(agent tools 2>&1)"
+check "news: tools listed, read tier"      bash -c "grep -q 'news_today *read' <<<\"\$1\" && grep -q 'read_interests *read' <<<\"\$1\"" _ "$OUT"
+if [ -f "$HERE/../06-monitor/monitor.py" ]; then
+  MON="$(python3 "$HERE/../06-monitor/monitor.py" status --json --days 1 2>/dev/null)"
+  check "monitor: news runs counted, nothing unknown" python3 -c "
+import json,sys
+s=json.loads(sys.argv[1]); a=[x for x in s['agents'] if x['agent']=='news'][0]
+assert a['runs']>=4, a
+assert '(unknown)' not in sys.argv[1] and '(hidden)' not in json.dumps(s['agents'])" "$MON"
+fi
+
 INST="$HERE/install_news_count.sh"
 check "installer: shell syntax"           bash -n "$INST"
 PL="$(DR_ROOT="$TMP/dr" bash "$INST" --print 2>/dev/null)"

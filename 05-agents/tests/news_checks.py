@@ -30,7 +30,7 @@ def no_secret(obj):
 now = news.now_utc()
 
 # --- the stand-in feeds themselves: a missing file names itself, not three odd failures ---------
-NEEDED = ["bbc", "bbc-india", "bbc-tech", "dw", "france24", "france24-biz", "guardian", "indianexp",
+NEEDED = ["bbc", "bbc-india", "bbc-tech", "dw", "france24", "france24-biz", "guardian", "indianexp", "nbc",
           "npr", "npr-biz", "npr-tech", "slashdot", "toi"]
 missing = [f"{n}.xml" for n in NEEDED if not (Path(os.environ["NEWS_FAKE"]) / f"{n}.xml").is_file()]
 check("stand-in feeds all present" + (f" (missing: {', '.join(missing)})" if missing else ""), not missing)
@@ -382,6 +382,91 @@ news.gather = real_gather
 err = json.loads(agent.LEDGER.read_text().splitlines()[-1])
 check("count: a failure leaves an error row (type only) and still fails",
       raised and err["event"] == "error" and err["where"] == "count" and err["error"] == "TimeoutError")
+
+# --- Part 2: the brief ---------------------------------------------------------
+adv = news.reads_as_advice
+yes = ["You should buy NVDA shares now.", "Consider buying the dip.", "Analysts lifted their price target.",
+       "It may be a good time to buy.", "Buy AMD before earnings.", "Time to go long oil.", "Set a stop-loss at 90.",
+       "We should trim the position.", "I recommend selling.", "Strong buy signal on chips.", "hold the stock"]
+no = ["Nvidia agreed to buy Arm for $40bn.", "Chip stocks sold off on Friday.", "A sell-off in bonds deepened.",
+      "Investors held their breath.", "Buyers lined up for the new phone.", "The company will sell its unit.",
+      "Short-term rates rose.", "Shipping costs could rise.", "Airlines may cancel flights."]
+check("advice: reads as advice", all(adv(x) for x in yes))
+check("advice: news about buying and selling is not advice", not any(adv(x) for x in no))
+const = "Never give me trading advice. I decide every trade myself, and I can always say no to any suggestion."
+check("constitution: 8 words in a row caught", news.echoes("Remember: I decide every trade myself, and I can always say", const))
+check("constitution: 7 words is not an echo", not news.echoes("I decide every trade myself, and I", const))
+
+mat = {"stories": [{"id": "s1"}, {"id": "s2"}], "_trends": [{"id": "t1", "story": "s1"}]}
+cb = news.check_brief("""## Rising
+- [t1, s1] Shipping talk rises. Why it might matter: travel.
+**YOUR WATCHLIST**
+- [s2] Chipmaker news. Why it might matter: watchlist.
+Worth knowing:
+- [s9] Made up.
+- [s1] See https://evil.example/x
+- [s1] You should buy NVDA now.
+- Not ready yet.
+Some chatter with no id.
+""", mat, const)
+check("brief check: sections read in any style", [(x[0], x[1]) for x in cb["items"]] ==
+      [("Rising", ["t1", "s1"]), ("Your watchlist", ["s2"])])
+check("brief check: unknown id, link, advice, no id each removed and counted",
+      cb["removed"] == {"unknown id": 1, "no id": 2, "link": 1, "advice": 1, "constitution": 0, "too many": 0})
+cb3 = news.check_brief("- [s1] As I said, I decide every trade myself, and I can always say no.", mat, const)
+check("brief check: constitution text removed and counted", not cb3["items"] and cb3["removed"]["constitution"] == 1)
+cb2 = news.check_brief("RISING\n- Not ready yet.\n", mat, const)
+check("brief check: 'Not ready yet' under Rising is allowed", sum(cb2["removed"].values()) == 0)
+many_lines = "\n".join(f"- [s1] item {i}" for i in range(15))
+check("brief check: at most BRIEF_SIZE items", len(news.check_brief(many_lines, mat)["items"]) == news.BRIEF_SIZE
+      and news.check_brief(many_lines, mat)["removed"]["too many"] == 3)
+check("brief check: no material = every id unknown", news.check_brief("- [s1] x", None)["removed"]["unknown id"] == 1)
+
+ip.write_text("- Follow closely: AI, Nvidia\n- Sometimes: golf, chip, Python\n- Never show me: celebrity, snake, python?\n")
+iv2 = news.read_interests(ip)
+check("never?: '?' words read with their line's sure words", iv2["never"] == ["celebrity", "snake"]
+      and iv2["maybe"] == [("python", ["celebrity", "snake"])])
+nc = news.never_check
+check("never?: no judge = left out (fail closed)", nc(iv2, "Python 3.15 released", None) is True)
+check("never?: judge says no = kept", nc(iv2, "Python 3.15 released", lambda *a: False) is False)
+check("never?: judge fails = left out", nc(iv2, "Python 3.15 released", lambda *a: 1 / 0) is True)
+check("never?: sure words never asked", nc(iv2, "A snake and a python", lambda *a: False) is True)
+
+asked = []
+def fake_judge(text, term, sure):
+    asked.append(text)
+    return "zoo" in text.lower() or "garble" in text.lower()
+m = news.material(judge=fake_judge)
+public = {k: v for k, v in m.items() if not k.startswith("_")}
+check("material: what the model sees has no links", "http" not in json.dumps(public) and "_index" not in public)
+check("material: story fields are exactly the shaped ones", all(set(s) == {"id", "outlets", "title", "summary",
+      "picked_for", "thin", "hours_ago"} for s in m["stories"]))
+check("material: each flagged story judged once", len(asked) == len(set(asked)) == 3)
+ptitles = [s["title"] for s in m["stories"]]
+check("material: judged out stays out, judged in can be picked", "Python 3.15 released with faster startup" in ptitles
+      and not any("zoo" in x or "GARBLE" in x for x in ptitles) and m["_stats"]["judged_out"] == 2)
+check("material: trends ready with 4+ days, each cites a real story", m["trends"]["ready"] and m["trends"]["items"]
+      and all(t["story"] in {s["id"] for s in m["stories"]} for t in m["trends"]["items"]))
+ho = news.group([story("Parliament session begins early", "Indian Express", True)])[0]
+check("material: headline-only story marked for the model", news.for_model("s1", {**ho, "matched": []})["summary"] == "(headline only)")
+
+check("trend with no story to cite: none found", news.trend_story(groups, {"kind": "names", "key": "Nowhere Land"}, {}) is None)
+real_ts = news.trend_story
+news.trend_story = lambda *a: None
+m_none = news.material()
+news.trend_story = real_ts
+check("trend with no story to cite: left out, never cited blind", m_none["trends"]["ready"] and m_none["trends"]["items"] == []
+      and m_none["_trends"] == [])
+checked = news.check_brief("RISING\n" + "\n".join(f"- [{t['id']}] {t['what']} rising. Why it might matter: x."
+                           for t in m["trends"]["items"]) + "\nWORTH KNOWING\n- [s1] First. Why it might matter: y.", m, const)
+txt = news.render_brief(checked, m, 1.0, "test-model")
+check("render: outlets by day under each trend", "outlets by day:" in txt)
+check("render: links printed by the code", "https://" in txt and txt.count("https://") >= len(checked["items"]))
+check("render: thin stories labelled", "one outlet" in txt)
+check("render: research-only footer", "Research only, not advice." in txt)
+bp = news.save_brief(news.dt.date(2026, 11, 8), txt)
+check("brief saved 600 in 700 folders", oct(bp.stat().st_mode)[-3:] == "600"
+      and oct(bp.parent.stat().st_mode)[-3:] == "700" and bp.parent.parent.name == "_news")
 
 print(f"\nnews checks: {PASS} pass · {FAIL} fail")
 sys.exit(1 if FAIL else 0)
