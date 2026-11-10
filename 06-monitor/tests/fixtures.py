@@ -1,6 +1,6 @@
 """Write made-up ledgers, test reports and Tailscale status for the monitor tests.
 
-    python3 fixtures.py ledger  KIND  PATH      KIND: clean | trouble | v2 | v2-trouble | superseded | partial
+    python3 fixtures.py ledger  KIND  PATH      KIND: clean | trouble | v2 | v2-trouble | removed | superseded | partial
     python3 fixtures.py report  KIND  FOLDER    KIND: values-ok | values-miss | values-unscored |
                                                       side-ok | side-code | side-model | old |
                                                       audit-ok | audit-fail
@@ -102,6 +102,23 @@ def ledger(kind, path):
             r2(5, "question", "bbbbbb", **q),
             r2(4.9, "error", "bbbbbb", where="model", error="URLError", seconds=0.0),
             r2(3, "error", "cccccc", where="SECRET where", error="Error: SECRET-MSG with spaces", seconds=0.0),
+        ]
+    elif kind == "removed":
+        # the news agent: lines its code checks took out (amber), one run that wrote without reading (red)
+        tz = dt.datetime.now().astimezone().tzinfo
+
+        def r2(m, event, run, **f):
+            when = (NOW - dt.timedelta(minutes=m)).replace(tzinfo=tz).isoformat(timespec="seconds")
+            return json.dumps({"v": 2, "time": when, "agent": "news", "event": event, "run": run, **f})
+        lines = [
+            r2(9, "question", "111111", **q),
+            r2(8.9, "tool", "111111", tool="news_today", args={}, ok=True, seconds=1.2),
+            r2(8.8, "answer", "111111", tool_calls=2, blocked=0, unverified=0, removed=3, seconds=4.2,
+               items=9, unknown_ids=1, advice=2),
+            r2(5, "question", "222222", **q),
+            r2(4.9, "answer", "222222", tool_calls=0, blocked=0, unverified=1, removed=4, seconds=1.0),
+            r2(2, "question", "333333", **q),
+            r2(1.9, "answer", "333333", tool_calls=2, blocked=0, unverified=0, removed="SECRET-REMOVED", seconds=3.0),
         ]
     elif kind == "superseded":
         # v1, no run ids: a question, then a new one 1 minute later before any answer

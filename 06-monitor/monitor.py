@@ -244,6 +244,7 @@ def safe_event(r):
     elif event == "answer":
         for k in ("tool_calls", "blocked", "unverified", "seconds"):
             e[k] = num(r.get(k))
+        e["removed"] = num(r.get("removed")) or 0          # lines the code took out before I saw them
     elif event == "error":
         e["where"] = r["where"] if isinstance(r.get("where"), str) and NAME.match(r["where"]) else "(hidden)"
         e["error"] = r["error"] if isinstance(r.get("error"), str) and ERRNAME.match(r["error"]) else "(hidden)"
@@ -261,7 +262,7 @@ def build_runs(rows, now):
 
     def start(r, key):
         run = {"agent": r["agent"], "start": r["_t"], "end": None, "tool_calls": 0, "blocked": 0,
-               "unverified": 0, "seconds": None, "failed_tools": 0, "finished": False, "superseded": False,
+               "unverified": 0, "removed": 0, "seconds": None, "failed_tools": 0, "finished": False, "superseded": False,
                "error": False}
         runs.append(run)
         open_by_key[key] = run
@@ -292,6 +293,7 @@ def build_runs(rows, now):
             run["finished"], run["end"] = True, r["_t"]
             run["seconds"] = num(r.get("seconds"))
             run["unverified"] = num(r.get("unverified")) or 0
+            run["removed"] = num(r.get("removed")) or 0
             run["blocked"] = max(run["blocked"], num(r.get("blocked")) or 0)
             open_by_key.pop(key, None)
     for run in runs:
@@ -317,6 +319,7 @@ def agent_stats(rows, runs, now, days):
             "failed_tools": sum(r["failed_tools"] for r in rs),
             "blocked": sum(r["blocked"] for r in rs),
             "unverified": sum(r["unverified"] for r in rs),
+            "removed": sum(r["removed"] for r in rs),
             "unfinished": sum(r["unfinished"] for r in rs),
             "errors": sum(r["error"] for r in rs),
             "running": sum(r["running"] for r in rs),
@@ -335,8 +338,12 @@ def ledger_alerts(stats, bad, days):
         if s["blocked"]:
             a.append(alert("red", f"{n}: {s['blocked']} blocked call(s)", f"last {days} days. See Live for the category"))
         if s["unverified"]:
-            a.append(alert("red", f"{n}: {s['unverified']} unverified date(s) in answers",
-                           f"last {days} days. A date the tool didn't give"))
+            a.append(alert("red", f"{n}: {s['unverified']} unverified claim(s) in answers",
+                           f"last {days} days. Something in an answer that no tool gave (earnings: a date)"))
+        if s["removed"]:
+            a.append(alert("amber", f"{n}: {s['removed']} line(s) removed by code checks",
+                           f"last {days} days. Caught before I saw them (made-up ids, links, advice, "
+                           f"constitution text). The brief's footer says which kind"))
         if s["failed_tools"]:
             a.append(alert("red", f"{n}: {s['failed_tools']} tool call(s) not ok", f"last {days} days"))
         if s["errors"]:
@@ -653,7 +660,7 @@ def render(s):
         timing = f"typical {a['typical_s']} s · slowest {a['slowest_s']} s" if a["typical_s"] is not None else "no answers yet"
         out.append(f"  {a['agent']:<12} {a['runs']} runs ({a['runs_today']} today) · {a['direct']} direct · "
                    f"{a['tool_calls']} tool calls · {timing}")
-        out.append(f"  {'':<12} blocked {a['blocked']} · unverified {a['unverified']} · unfinished {a['unfinished']}"
+        out.append(f"  {'':<12} blocked {a['blocked']} · unverified {a['unverified']} · removed {a['removed']} · unfinished {a['unfinished']}"
                    f"{' · errors ' + str(a['errors']) if a['errors'] else ''}"
                    f"{' · running ' + str(a['running']) if a['running'] else ''} · last {a['last_ago']}")
 
@@ -682,7 +689,8 @@ def describe(e):
     if ev == "blocked":
         return f"{e['tool']} · {e['reason']}"
     if ev == "answer":
-        return f"{e.get('tool_calls')} calls · {e.get('blocked')} blocked · {e.get('unverified')} unverified · {e.get('seconds')} s"
+        return (f"{e.get('tool_calls')} calls · {e.get('blocked')} blocked · {e.get('unverified')} unverified"
+                + (f" · {e['removed']} removed" if e.get("removed") else "") + f" · {e.get('seconds')} s")
     if ev == "direct":
         return f"{args}{hidden}"
     return ""

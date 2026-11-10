@@ -23,7 +23,7 @@ An agent I run by hand today and one that runs on a schedule later show up the s
 
 | Source | Shows |
 |---|---|
-| `~/vault/.agents/ledger.jsonl` | Runs per agent, tool calls, blocked, unverified, unfinished, typical and slowest time, latest events |
+| `~/vault/.agents/ledger.jsonl` | Runs per agent, tool calls, blocked, unverified, removed, unfinished, typical and slowest time, latest events |
 | `~/vault/values/constitution.md` + `.values/approved.sha256` | Approved and unchanged, or BIG RED FLAG |
 | Vault, agents folder, ledger | Permissions still 700 / 700 / 600 |
 | Ollama `/api/version`, `/api/tags`, `/api/ps` | Up, models installed, models loaded |
@@ -39,7 +39,7 @@ An agent I run by hand today and one that runs on a schedule later show up the s
 |---|---|
 | Alerts | Red and amber, with a count on the tab |
 | Now | Constitution, model server, models loaded, machines, permissions |
-| Agents | One card per agent: runs, tool calls, time, blocked, unverified, no answer |
+| Agents | One card per agent: runs, tool calls, time, blocked, unverified, removed by checks (when any), no answer |
 | Live | Every event, newest first. New rows appear as the agents write them (about 1 s) |
 | Tests | Values, side-door, verify.sh: score, when, ok / old / missed |
 
@@ -64,7 +64,7 @@ number climbs past 35, the page is already reconnecting.
 | Red | Amber |
 |---|---|
 | Constitution changed or missing | Constitution not approved yet |
-| Blocked call, unverified date, tool not ok, run ended in an error (last 7 days) | Run with no answer (crashed or stopped) |
+| Blocked call, unverified claim (something no tool gave), tool not ok, run ended in an error (last 7 days) | Run with no answer (crashed or stopped); lines removed by an agent's code checks (already caught, before I saw them) |
 | Permissions loosened | Ledger line I couldn't read |
 | Model server down, model missing | Test never run, or older than 14 days |
 | Values test missed, side-door code guard slipped, verify.sh failed | Side-door: the model slipped but the code held |

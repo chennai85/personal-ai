@@ -180,7 +180,8 @@ function agentsView(s) {
                 tile(a.tool_calls, `tool calls · ${a.direct} direct`, "t-gray"),
                 tile(a.typical_s === null ? "—" : `${a.typical_s} s`, a.slowest_s === null ? "no answers yet" : `typical · slowest ${a.slowest_s} s`, "t-gray"),
                 tile(a.blocked, "blocked", a.blocked ? "t-red" : "t-green"),
-                tile(a.unverified, "unverified dates", a.unverified ? "t-red" : "t-green"),
+                tile(a.unverified, "unverified", a.unverified ? "t-red" : "t-green"),
+                a.removed ? tile(a.removed, "removed by checks", "t-amber") : null,
                 tile(a.unfinished, "no answer", a.unfinished ? "t-amber" : "t-green"),
                 a.errors ? tile(a.errors, "ended in an error", "t-red") : null,
             ))))];
@@ -197,14 +198,14 @@ function describe(e) {
         case "tool": return [`${e.tool} ${e.ok ? "ok" : "NOT OK" + (e.error ? ` (${e.error})` : "")}`, `${e.seconds} s`, args].filter(Boolean).join(" · ") + hidden;
         case "error": return `${e.where} · ${e.error} · ${e.seconds} s`;
         case "blocked": return `${e.tool} · ${e.reason}`;
-        case "answer": return `${e.tool_calls} calls · ${e.blocked} blocked · ${e.unverified} unverified · ${e.seconds} s`;
+        case "answer": return `${e.tool_calls} calls · ${e.blocked} blocked · ${e.unverified} unverified` + (e.removed ? ` · ${e.removed} removed` : "") + ` · ${e.seconds} s`;
         case "direct": return args + hidden;
         default: return "";
     }
 }
 function tone(e) {
     if (e.event === "blocked" || e.event === "error" || (e.event === "tool" && !e.ok) || (e.event === "answer" && (e.unverified || e.blocked))) return "red";
-    if (e.event === "answer") return "green";
+    if (e.event === "answer") return e.removed ? "amber" : "green";
     return "gray";
 }
 
