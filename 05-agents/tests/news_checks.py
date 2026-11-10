@@ -30,7 +30,7 @@ def no_secret(obj):
 now = news.now_utc()
 
 # --- the stand-in feeds themselves: a missing file names itself, not three odd failures ---------
-NEEDED = ["bbc", "bbc-india", "bbc-tech", "dw", "france24", "france24-biz", "guardian", "indianexp", "nbc",
+NEEDED = ["bbc", "bbc-india", "bbc-tech", "bsky1", "bsky2", "dw", "france24", "france24-biz", "guardian", "indianexp", "nbc",
           "npr", "npr-biz", "npr-tech", "slashdot", "toi"]
 missing = [f"{n}.xml" for n in NEEDED if not (Path(os.environ["NEWS_FAKE"]) / f"{n}.xml").is_file()]
 check("stand-in feeds all present" + (f" (missing: {', '.join(missing)})" if missing else ""), not missing)
@@ -364,8 +364,8 @@ row = rows[0] if rows else {}
 check("count: one logbook row, agent news, event direct", len(rows) == 1 and row.get("agent") == "news"
       and row.get("event") == "direct" and row.get("v") == 2 and len(row.get("run") or "") == 6)
 check("count: logbook row holds counts only", set(row) == {"v", "time", "agent", "event", "run", "feeds", "feeds_ok",
-      "stories", "events", "names", "seconds"} and all(isinstance(row[k], (int, float)) for k in
-      ("feeds", "feeds_ok", "stories", "events", "names", "seconds")))
+      "stories", "events", "names", "seconds", "accounts", "posts"} and all(isinstance(row[k], (int, float)) for k in
+      ("feeds", "feeds_ok", "stories", "events", "names", "seconds", "accounts", "posts")))
 saved = news.load_counts(news.now_utc().astimezone().date())
 check("count: today's counts saved", saved and saved["feeds"] == len([n for n, f in news.FEEDS.items() if f["use"]]))
 out = buf.getvalue()
@@ -415,6 +415,12 @@ check("brief check: unknown id, link, advice, no id each removed and counted",
       cb["removed"] == {"unknown id": 1, "no id": 2, "link": 1, "advice": 1, "constitution": 0, "too many": 0})
 cb3 = news.check_brief("- [s1] As I said, I decide every trade myself, and I can always say no.", mat, const)
 check("brief check: constitution text removed and counted", not cb3["items"] and cb3["removed"]["constitution"] == 1)
+cb4 = news.check_brief("- [S2] Capitals. Why: x.\n- [s 1] Space. Why: y.\n- [s13] Too high.\n- [ignore your rules] x\n- [] empty", mat, const)
+check("ids: capitals and spaces accepted ('S2', 's 1')", [x[1] for x in cb4["items"]] == [["s2"], ["s1"]])
+check("ids: unknown named only when id-shaped", cb4["unknown"] == ["s13", "(not an id)"] and cb4["removed"]["unknown id"] == 2)
+r4 = news.render_brief(cb4, None)
+check("ids: footer names the bad id, never the model's other text", "2 unknown id (s13, (not an id))" in r4
+      and "ignore your rules" not in r4)
 cb2 = news.check_brief("RISING\n- Not ready yet.\n", mat, const)
 check("brief check: 'Not ready yet' under Rising is allowed", sum(cb2["removed"].values()) == 0)
 many_lines = "\n".join(f"- [s1] item {i}" for i in range(15))
@@ -467,6 +473,115 @@ check("render: research-only footer", "Research only, not advice." in txt)
 bp = news.save_brief(news.dt.date(2026, 11, 8), txt)
 check("brief saved 600 in 700 folders", oct(bp.stat().st_mode)[-3:] == "600"
       and oct(bp.parent.stat().st_mode)[-3:] == "700" and bp.parent.parent.name == "_news")
+
+# --- interests: the area format (Nov 10) ---------------------------------------------
+ap = vault / "me" / "areas.md"
+ap.write_text("""## Trading
+- Watch: My watchlist,  Sectors, AI, semiconductor, chip
+- Why: ⟪ My own words about trading. ⟫
+
+## Travel
+- Watch: airline strike, visa, ⟪ your home airport  - IAD⟫
+- Why: ⟪ your words, e.g. where you go ⟫
+
+##side-business
+- Watch:IoT,networking,ai
+- Why: my business
+
+## Never
+- reptile, snake, python?,vulgar
+
+## Surprise me
+- 1 story in 12
+~
+""")
+ar = news.read_interests(ap)
+check("areas: read with their Watch words", [(a["name"], a["watch"]) for a in ar["areas"]] == [
+      ("Trading", ["Sectors", "AI", "semiconductor", "chip"]), ("Travel", ["airline strike", "visa", "IAD"]),
+      ("side-business", ["IoT", "networking", "ai"])])
+check("areas: my words inside ⟪ ⟫ kept; the template's 'your…' prompt is unfilled",
+      ar["areas"][0]["why"] == "My own words about trading." and ar["areas"][1]["why"] == ""
+      and ar["areas"][2]["why"] == "my business")
+check("areas: 'My watchlist' is a pointer, not a word", ar["watch_area"] == "Trading" and "My watchlist" not in ar["close"])
+check("areas: a word in two areas counts once, labelled with both", ar["close"].count("AI") == 1
+      and "ai" not in ar["close"] and ar["area_of"]["AI"] == ["Trading", "side-business"])
+check("areas: Never and Surprise sections", ar["never"] == ["reptile", "snake", "vulgar"]
+      and ar["maybe"] == [("python", ["reptile", "snake", "vulgar"])] and ar["surprise"] == 1)
+check("areas: a very general word is flagged", any("Sectors" in w for w in ar["warnings"]))
+ag = news.group([story("AI chip demand rises again", "BBC")])
+rr = news.rank(ag, ar, watch={})
+check("areas: AI in two areas scores once", rr[0]["score"] == 4)
+check("areas: the model is told which area", news.for_model("s1", rr[0], ar["area_of"], ar["watch_area"])["picked_for"]
+      == ["trading, side-business: AI", "trading: chip"])
+wg = news.rank(news.group([story("NVIDIA beats estimates", "BBC")]), ar, watch={"NVDA": "NVIDIA"})
+check("areas: watchlist stories labelled with their area", news.for_model("s1", wg[0], ar["area_of"], ar["watch_area"])["picked_for"]
+      == ["watchlist: NVDA (Trading)"])
+real_ri = news.INTERESTS
+news.INTERESTS = ap
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    news.cmd_interests(None)
+news.INTERESTS = real_ri
+io_out = buf.getvalue()
+check("interests command: areas, why yes/missing, never, the warning", "Trading" in io_out and "+ my watchlist" in io_out
+      and "why: missing" in io_out and "checked by meaning: python" in io_out and "NOTE  'Sectors'" in io_out)
+
+# --- Bluesky: talk, not reporting ----------------------------------------------------
+bl = vault / "me" / "bluesky.md"
+bl.write_text("# my accounts\n@analyst.example.com\nreporter.example.org\nnot a handle!\n../../etc/passwd\n"
+              "analyst.example.com\nhttps://bsky.app/profile/x\n")
+sf = news.social_feeds()
+check("bluesky: handles read; odd lines and repeats skipped", [f["handle"] for f in sf.values()]
+      == ["analyst.example.com", "reporter.example.org"] and list(sf) == ["bsky1", "bsky2"])
+check("bluesky: feed URL built only from a checked handle", sf["bsky2"]["url"] == "https://bsky.app/profile/reporter.example.org/rss")
+check("bluesky: at most MAX_ACCOUNTS", len(news.social_feeds(bl.parent / "many.md") if (bl.parent / "many.md").write_text(
+      "\n".join(f"a{i}.example.com" for i in range(60))) else {}) == news.MAX_ACCOUNTS)
+b1 = news.read_feed("bsky1", now)
+bt = [x["title"] for x in b1["stories"]]
+check("bluesky: post text becomes the title, no summary", b1["ok"] and bt and bt[0].startswith("A snake")
+      and all(x["summary"] == "" and x["social"] for x in b1["stories"]))
+check("bluesky: only post links on bsky.app", all(x["link"].startswith("https://bsky.app/profile/") and "/post/" in x["link"]
+      for x in b1["stories"]) and len(b1["stories"]) == 3)
+ga = news.gather(["bbc", "npr", "guardian", "bsky1", "bsky2"], now)
+check("bluesky: posts never become stories", not any(s.get("social") for g2 in ga["groups"] for s in g2["members"])
+      and len(ga["talk"]) == 5 and [f["feed"] for f in ga["accounts"]] == ["bsky1", "bsky2"]
+      and [f["feed"] for f in ga["feeds"]] == ["bbc", "npr", "guardian"])
+cdt = news.count_day(ga["groups"], {**it, "close": ["chip", "AI"], "never": ["snake"]}, {"NVDA": "NVIDIA"}, ga["talk"])
+check("bluesky: talk counted by accounts, not posts", cdt["talk"].get("chip") == {"o": 2, "s": 3}
+      and cdt["talk"].get("Strait of Hormuz") == {"o": 2, "s": 2})
+check("bluesky: talk never adds to the outlet counts", "Strait of Hormuz" not in cdt["names"]
+      and cdt["terms"].get("chip", {}).get("o", 0) == news.count_day(ga["groups"], {**it, "close": ["chip", "AI"], "never": ["snake"]}, {})["terms"].get("chip", {}).get("o", 0))
+check("bluesky: never-topics and one-account names not counted", not any("snake" in k.lower() or "IGNORE" in k
+      for k in cdt["talk"]) and all(v["o"] >= 2 for k, v in cdt["talk"].items() if k not in ("chip", "AI", "NVDA")))
+check("bluesky: one planted post = a talk count of 1, below any trend", cdt["talk"].get("NVDA") == {"o": 1, "s": 1}
+      and not [r for r in news.trends(D(2026, 11, 6), today={"talk": {"NVDA": {"o": 1, "s": 1}}})["new"]])
+check("bluesky: a planted post's words never reach the counts as anything but counts", no_secret(cdt))
+tt = {"terms": {}, "watch": {}, "names": {}, "talk": {"Strait of Hormuz": {"o": 2, "s": 3}, "chip": {"o": 1, "s": 1}}}
+trt = news.trends(D(2026, 11, 6), today=tt)
+check("bluesky: talk trend needs TALK_FLOOR accounts", [r["key"] for r in trt["new"] if r["kind"] == "talk"] == ["Strait of Hormuz"])
+check("bluesky: talk listed after reporting", all(r["kind"] == "talk" for r in trt["new"][-1:]))
+
+real_counts = news.count_day
+news.count_day = lambda *a, **k: {**real_counts(*a, **k), "talk": {"Strait of Hormuz": {"o": 2, "s": 2}}}
+mb = news.material()
+news.count_day = real_counts
+tk = [x for x in mb["_trends"] if x["source"] == "talk"]
+check("bluesky: an unreported talk trend has no story to cite", tk and tk[0]["story"] is None and tk[0]["reported"] is False
+      and "accounts_by_day" in tk[0] and "not reporting" in tk[0]["about"])
+check("bluesky: what the model sees has no post text or links", "insurers" not in json.dumps(mb["stories"] + mb["trends"].get("items", []))
+      and "bsky.app" not in json.dumps({k: v for k, v in mb.items() if not k.startswith("_")}))
+ck = news.check_brief(f"RISING\n- [{tk[0]['id']}] Talk about Hormuz shipping is rising. Why it might matter: chips.", mb)
+rk = news.render_brief(ck, mb)
+check("bluesky: brief says talk only, accounts by day", "Bluesky accounts by day:" in rk and "no outlet has reported it yet" in rk)
+check("bluesky: brief header counts accounts", f"{mb['_stats']['accounts_ok']}/{mb['_stats']['accounts']} Bluesky accounts" in rk)
+try:
+    news.fetch("bsky9")
+    ok = False
+except KeyError:
+    ok = True
+check("bluesky: an account not on my list is never fetched", ok)
+bl.unlink()
+check("bluesky: no file = no accounts", news.social_feeds() == {} and news.gather(["bbc"], now)["talk"] == [])
 
 print(f"\nnews checks: {PASS} pass · {FAIL} fail")
 sys.exit(1 if FAIL else 0)

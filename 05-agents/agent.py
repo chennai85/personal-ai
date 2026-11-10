@@ -224,8 +224,10 @@ def tool_news_today():
 def tool_read_interests():
     import news
     it, watch = news.read_interests(), news.watch_names()
-    return {"follow_closely": it["close"], "sometimes": it["some"], "travel": it["travel"],
-            "watchlist": [f"{t} ({n})" if n else t for t, n in watch.items()], "found": it["found"]}
+    return {"areas": [{"area": x["name"], "watch": x["watch"], "why_it_matters_to_me": x["why"]} for x in it["areas"]],
+            "follow_closely": it["close"], "sometimes": it["some"], "travel": it["travel"],
+            "watchlist": [f"{t} ({n})" if n else t for t, n in watch.items()],
+            "watchlist_area": it["watch_area"], "found": it["found"]}
 
 
 TOOLS = {
@@ -291,10 +293,13 @@ NEWS_RULES = """You are my morning news agent. Research only.
   RISING: one line per trend. YOUR WATCHLIST: stories picked for a watchlist company. WORTH KNOWING: the rest.
 - Every item is one line: "- [id] what is happening, in one sentence. Why it might matter: one sentence."
   Use the ids exactly as given (s3, t1). Several ids are fine: "- [t1, s4] ...".
-- "Why it might matter" connects the item to my interests, travel or watchlist companies. If it connects
+- "Why it might matter" connects the item to my interests, travel or watchlist companies. Each area in
+  read_interests has why_it_matters_to_me, in my own words: use it, and name the area. If an item connects
   to nothing of mine, write "Outside your usual interests."
 - If trends are not ready, write under RISING only: "- Not ready yet."
 - If a story is thin (one outlet) or headline only, don't overstate it.
+- A trend whose source is "talk" is people posting on Bluesky, not reporting. Say "talk" or "chatter", never
+  that something happened. If it isn't reported yet, cite only its trend id.
 - Never write links, web addresses or sources: the code prints those.
 - Never say whether to buy, sell, short or hold anything. No price targets, no predictions about a stock's
   price, no "you should". Describe; don't advise.
@@ -417,10 +422,13 @@ def run_agent(agent, question):
         import news
         checked = news.check_brief(text, material, constitution)
         gone = checked["removed"]
-        unverified = gone["unknown id"] + gone["no id"] + (1 if material is None and text else 0)
+        # Removed lines never reach me: amber on the monitor. Unverified (red) = the model wrote a brief
+        # without reading the news at all.
+        unverified = 1 if material is None and text else 0
         st = (material or {}).get("_stats", {})
         ledger(agent, "answer", run, tool_calls=calls, blocked=len(blocked), unverified=unverified,
-               seconds=round(time.time() - t0, 1), items=len(checked["items"]), advice=gone["advice"],
+               removed=sum(gone.values()), seconds=round(time.time() - t0, 1), items=len(checked["items"]),
+               unknown_ids=gone["unknown id"], advice=gone["advice"],
                constitution=gone["constitution"], links=gone["link"], stories=st.get("stories", 0),
                trends=st.get("trends", 0), judged=st.get("judged", 0), judged_out=st.get("judged_out", 0))
         return {"text": text, "checked": checked, "material": material, "blocked": blocked,

@@ -59,7 +59,8 @@ def brief(q, messages, tools_done):
     tr = today.get("trends", {})
     if tr.get("ready"):
         for t in tr.get("items", []):
-            lines.append(f"- [{t['id']}, {t['story']}] Coverage of {t['what']} is rising. Why it might matter: "
+            cite = f"{t['id']}, {t['story']}" if t.get("story") else t["id"]
+            lines.append(f"- [{cite}] Coverage of {t['what']} is rising. Why it might matter: "
                          f"it touches {', '.join(mine.get('follow_closely', [])[:1]) or 'the news'}.")
     else:
         lines.append("- Not ready yet.")
@@ -72,6 +73,12 @@ def brief(q, messages, tools_done):
         if not any(x.startswith("watchlist") for x in st["picked_for"]):
             lines.append(f"- [{st['id']}] {st['title']}. Why it might matter: {st['picked_for'][0]}.")
     first = stories[0]["id"] if stories else "s1"
+    if 'source is "talk"' not in messages[0]["content"]:
+        lines.append(f"- [{first}] RULES-MISSING-TALK. Why it might matter: the rules changed.")
+    for a in mine.get("areas", []):
+        if a.get("why_it_matters_to_me"):
+            lines.append(f"- [{first}] Echo of the area. Why it might matter: {a['why_it_matters_to_me']}")
+            break
     if any("http" in mm["content"] for mm in tools_done):
         lines.append(f"- [{first}] LINKS-SEEN by the model. Why it might matter: it shouldn't.")
     if "MAKE_UP_ID" in q:

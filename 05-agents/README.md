@@ -75,7 +75,7 @@ The contract every agent follows, including life admin. It stores what was done,
 | `chars`, `model` | `question` | The question's length, never its words |
 | `tool`, `args`, `args_hidden`, `ok`, `seconds`, `error` | `tool` | `args` keeps only what the tool declares safe (`"show"` in `TOOLS`); the rest is a count. A tool that breaks: `ok: false`, `error` = the error's type, and the run goes on |
 | `tool`, `reason`, `args_chars` | `blocked` | `reason` is one of five kinds (no such tool · not on this agent's list · tool tier not allowed · arguments refused · tool budget reached). What the model sent is never stored, only its length. A tool name that isn't a plain name is stored as `null` |
-| `tool_calls`, `blocked`, `unverified`, `seconds` | `answer` | The end of a run |
+| `tool_calls`, `blocked`, `unverified`, `seconds`, `removed` | `answer` | The end of a run. `unverified` = something in the answer no tool gave (earnings: a date; news: a brief written without reading the news). `removed` (optional, Nov 10) = lines the code took out before I saw them. Agents may add their own counts (news: `items`, `unknown_ids`, `advice`, `constitution`, `links`, …); the monitor shows only the shared ones |
 | `where`, `error`, `seconds` | `error` | The run ended without an answer (model server down, a bad reply). `error` is a type, never a message |
 | `tickers` | `direct` | The no-model baseline |
 
@@ -133,7 +133,7 @@ Dates are made up, my real watchlist isn't touched, and the run's ledger is a th
 ```bash
 cd ~/driving-range/ai-experiments/personal-ai && git pull
 cd 05-agents
-bash tests/test_agent.sh                                  # 280 checks, stand-in model, made-up dates, stand-in feeds
+bash tests/test_agent.sh                                  # 320 checks, stand-in model, made-up dates, stand-in feeds
 uv run agent.py tools                                     # what it can and can't do
 uv run agent.py earnings --direct NVDA AAPL MSFT          # facts only, no model: the baseline
 uv run agent.py earnings "When do NVDA, AAPL and MSFT report?"
@@ -161,7 +161,7 @@ uv run agent.py earnings "When does my watchlist report?"
 
 ## Tested (stand-in model)
 
-`bash tests/test_agent.sh`: 280 checks, all pass (99 before the news feeds, 69 before ledger v2). Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
+`bash tests/test_agent.sh`: 320 checks, all pass (99 before the news feeds, 69 before ledger v2). Never touches `~/vault`, Yahoo or the Studio. `03-memory/tests/test_memory.sh` still passes 79/79.
 
 To check the tests themselves, I broke each guard on purpose and re-ran them. Every break was caught. The first time, removing the "on this agent's list" check changed nothing: with one agent, every tool is on its list. That check is now tested directly.
 
@@ -177,7 +177,8 @@ My second agent. Not a headline list (I can skim sites myself): **trends and con
 | Fresh and alive | Stories older than 36 h dropped; a feed with nothing newer than 7 days is "stale"; each feed gives at most its 20 freshest |
 | Thin | One outlet only = labelled thin. More outlets rank higher |
 | Watchlist | Read with the earnings agent's own rule. Company names from Yahoo, cleaned, saved in `~/vault/_news/names.json` (600), refreshed weekly. Counts most (×3) |
-| Interests | `~/vault/me/interests.md`, my words: Follow closely ×2, Travel ×2, Sometimes ×1, Never = removed |
+| Interests | `~/vault/me/interests.md`, my words. **Areas** (Nov 10): `## Trading`, `## Travel`, … each with `- Watch:` words (code: pick, rank, count; ×2, once even if in two areas) and `- Why:` in my words (the model uses it to explain). `My watchlist` under Watch puts watchlist stories in that area. `## Never` (a `?` word = checked by meaning), `## Surprise me`. Words inside the template's `⟪ ⟫` count as mine. The older line format still works. `uv run news.py interests` shows how the file was read |
+| Bluesky | Accounts in `~/vault/me/bluesky.md`, one handle per line (max 40; odd lines skipped). **Talk, not reporting**: posts are shaped like headlines but never grouped, ranked, shown or counted as an outlet. They add a talk count per subject (accounts, not posts). A talk trend needs 2 accounts and is labelled "talk"; if no outlet has reported it, the brief says so and cites only the trend |
 | India | At most 1 India-only story per brief; a watchlist story always gets through |
 | Briefs | Saved under `~/vault/_news/`, which memory search never indexes |
 | Trends | **Counts only**: how many outlets mentioned each of my terms, watchlist companies and recurring names each day, in `~/vault/_news/counts/` (600, kept 60 days). No headlines. A name is kept only if 2+ outlets used it. Rising = 2× the 7-day average and 2+ more; new = 3+ outlets today, none before (watchlist: 2). Needs 4 days of counts. Never-topics aren't counted |
@@ -194,12 +195,13 @@ uv run news.py names       # my watchlist's company names
 uv run news.py preview     # the ranked stories, no model
 uv run agent.py news                      # my morning brief (the model + code checks)
 uv run agent.py news "chips and shipping" # the same, with a focus
+uv run news.py interests   # how my interests file was read
 uv run news.py count       # save today's counts (the 3:30 am job does this)
 uv run news.py trends      # what's rising or new, once there are 4 days of counts
 bash install_news_count.sh          # schedule the 3:30 am count (status | now | remove)
 ```
 
-Mutation check: 96 guards in `news.py` and 10 in the agent wiring broken on purpose, all caught (the agent ones with the full suite), after a baseline run proves the checks pass on the real code (a check that always fails would "catch" everything). The first pass caught 23/32. The survivors added checks, removed one rule and two lines that did nothing, and found real gaps: feed boilerplate, text hidden inside `<iframe>` reaching the summary, and never-topic stories feeding the counts.
+Mutation check: 128 guards in `news.py`, 12 in the agent wiring and 7 for the logbook's `removed` field broken on purpose, all caught (the agent ones with the full suite), after a baseline run proves the checks pass on the real code (a check that always fails would "catch" everything). The first pass caught 23/32. The survivors added checks, removed one rule and two lines that did nothing, and found real gaps: feed boilerplate, text hidden inside `<iframe>` reaching the summary, and never-topic stories feeding the counts.
 
 ## What the real runs found
 
@@ -225,9 +227,9 @@ The guard checked that every date came from the source. It didn't check how sure
 |---|---|
 | `agent.py` | The agent, tools, guards, ledger |
 | `sidedoor.py` | The side-door test: 7 planted instructions, real model, scored automatically |
-| `tests/test_agent.sh` | 280 checks with a stand-in model, made-up dates and stand-in feeds, including ledger v2 and whether the monitor reads it |
+| `tests/test_agent.sh` | 320 checks with a stand-in model, made-up dates and stand-in feeds, including ledger v2 and whether the monitor reads it |
 | `news.py` | The news agent's feeds and shaping (Part 1): `feeds` checks every feed, `preview` ranks stories by my interests, no model |
-| `tests/news_checks.py` | 146 checks on feeds, shaping, ranking, India cap, watchlist names, counts, trends and the brief's line checks, run by `test_agent.sh` |
+| `tests/news_checks.py` | 178 checks on feeds, shaping, ranking, India cap, watchlist names, counts, trends, the brief's line checks, interest areas and Bluesky talk, run by `test_agent.sh` |
 | `install_news_count.sh` | The 3:30 am count, as a LaunchAgent (`com.drivingrange.newscount`) |
 | `tests/news_feeds/` | Stand-in feeds, each broken on purpose: HTML inside, full article text, hidden characters, off-site links, a stale feed, an XML bomb, a web page pretending to be a feed |
 | `tests/mock_agent_ollama.py` | Stand-in model that calls tools in fixed ways (and misbehaves on purpose). `MOCK_OBEY=1` makes it follow every planted instruction |

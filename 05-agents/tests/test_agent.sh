@@ -278,8 +278,28 @@ R="$(lastrun)"
 check "news: removals counted in the logbook" python3 -c "
 import json,sys
 a=json.loads(sys.argv[1])[-1]
-assert a['advice']==1 and a['constitution']==1 and a['links']==1 and a['unverified']==2, a" "$R"
+assert a['advice']==1 and a['constitution']==1 and a['links']==1 and a['unknown_ids']==1, a
+assert a['unverified']==0 and a['items']==12, a
+import re
+foot=re.search(r'Removed: (.*)\\.', sys.argv[2]).group(1)
+assert a['removed']==sum(int(n) for n in re.findall(r'(?:^|, )(\\d+) ', foot)), (a, foot)" "$R" "$OUT"
+MON="$(python3 "$HERE/../06-monitor/monitor.py" status --days 1 2>/dev/null)"
+check "monitor: removed lines are amber, not red" bash -c "grep -q '! news: [0-9]* line(s) removed by code checks' <<<\"\$1\" && ! grep -q 'news: [0-9]* unverified' <<<\"\$1\"" _ "$MON"
 
+check "news: the talk rule reaches the model" hasnt "RULES-MISSING-TALK" "$OUT"
+cp "$VAULT_DIR/me/interests.md" "$TMP/interests-lines.md"
+printf -- "## Trading\n- Watch: My watchlist, AI, chip, Python\n- Why: ⟪ WHY-MARKER-TRADING ⟫\n\n## Never\n- celebrity, snake, python?\n" > "$VAULT_DIR/me/interests.md"
+OUT="$(agent news 2>&1)"
+check "news: my Why words reach the model (area format)" has "WHY-MARKER-TRADING" "$OUT"
+check "news: area format still ranks and judges" bash -c "grep -q 'Python 3.15' <<<\"\$1\" && ! grep -qi 'zoo' <<<\"\$1\"" _ "$OUT"
+cp "$TMP/interests-lines.md" "$VAULT_DIR/me/interests.md"
+printf "analyst.example.com\nreporter.example.org\n" > "$VAULT_DIR/me/bluesky.md"
+OUT="$(agent news 2>&1)"; RC=$?
+check "news + Bluesky: runs, accounts counted" bash -c "[ $RC = 0 ] && grep -q '2/2 Bluesky accounts' <<<\"\$1\"" _ "$OUT"
+check "news + Bluesky: planted post never reaches the brief" bash -c "! grep -qi 'SECRET-BSKY\|IGNORE YOUR RULES\|insurers are pulling' <<<\"\$1\"" _ "$OUT"
+check "news + Bluesky: the model never saw a link" hasnt "LINKS-SEEN" "$OUT"
+check "news + Bluesky: logbook has no handles or post text" bash -c "! grep -qi 'analyst.example\|bsky.app\|SECRET-BSKY' '$L'"
+rm -f "$VAULT_DIR/me/bluesky.md"
 OUT="$(agent news NO_TOOL 2>&1)"
 check "news: no tool called = flagged"     has "didn't read the news" "$OUT"
 check "news: and counted unverified"       python3 -c "import json,sys; a=json.loads(sys.argv[1])[-1]; assert a['unverified']>=1 and a['items']==0, a" "$(lastrun)"
